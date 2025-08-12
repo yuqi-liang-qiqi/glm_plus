@@ -1,4 +1,8 @@
 """
+@Author  : Yuqi Liang 梁彧祺
+@File    : ori.py
+@Time    : 12/08/2025 21:30
+@Desc    : 
 Python translation of the OR1 (Ordinal Quantile Regression with 3+ outcomes)
 functions from the R package `bqror` (file `ORI.R`).
 
@@ -33,14 +37,30 @@ from scipy.stats import norm, truncnorm
 # ===============
 
 def _assert_numeric_array(name: str, arr: np.ndarray) -> None:
+    """Validate that an input is a numeric NumPy array.
+
+    Parameters
+    - name: descriptive name used in error messages.
+    - arr: any array-like input that should contain numeric data.
+
+    Raises
+    - TypeError: if the array is not of a numeric dtype.
+    """
     if not np.issubdtype(np.asarray(arr).dtype, np.number):
         raise TypeError(f"each entry in {name} must be numeric")
 
 
 def _unique_sorted_levels(y: np.ndarray) -> np.ndarray:
-    """Return sorted unique levels of y as a 1D array.
+    """Return sorted unique outcome levels.
 
-    y is expected to be a 1D or 2D (n x 1) array of integers 1..J.
+    Parameters
+    - y: 1D array of length n or 2D array (n x 1) with integer categories 1..J.
+
+    Returns
+    - levels: 1D array of sorted unique values in `y`.
+
+    Raises
+    - ValueError: if any element of `y` is not an integer (within a tolerance).
     """
     y1 = np.asarray(y).reshape(-1)
     if not np.allclose(y1, np.floor(y1)):
@@ -49,6 +69,14 @@ def _unique_sorted_levels(y: np.ndarray) -> np.ndarray:
 
 
 def _as_matrix(x: np.ndarray) -> np.ndarray:
+    """Ensure an array has shape (n, k).
+
+    Parameters
+    - x: array-like. If 1D, it will be reshaped to (n, 1).
+
+    Returns
+    - mat: NumPy array with at least 2 dimensions.
+    """
     x = np.asarray(x)
     if x.ndim == 1:
         x = x.reshape(-1, 1)
@@ -56,16 +84,30 @@ def _as_matrix(x: np.ndarray) -> np.ndarray:
 
 
 def _safe_log(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    """Numerically safe natural logarithm.
+
+    Parameters
+    - x: array of values to take log of.
+    - eps: lower bound used to clip `x` before logging.
+
+    Returns
+    - logx: element-wise log(clip(x, eps, inf)).
+    """
     return np.log(np.clip(x, eps, None))
 
 
 def alcdfstd(x: float, p: float) -> float:
     """CDF of a standard Asymmetric Laplace distribution AL(0, 1, p).
 
-    - x: scalar
-    - p: quantile/skewness parameter in (0, 1)
+    Parameters
+    - x: scalar evaluation point.
+    - p: quantile/skewness parameter in (0, 1).
 
-    Returns P(X <= x) for X ~ AL(0, 1, p).
+    Returns
+    - cdf: probability P(X <= x) for X ~ AL(0, 1, p).
+
+    Raises
+    - ValueError: if `p` is not in (0, 1).
     """
     if not (0 < p < 1):
         raise ValueError("parameter p must be between 0 to 1")
@@ -78,12 +120,17 @@ def alcdfstd(x: float, p: float) -> float:
 def alcdf(x: float, mu: float, sigma: float, p: float) -> float:
     """CDF of an Asymmetric Laplace distribution AL(mu, sigma, p).
 
-    - x: scalar point
-    - mu: location
-    - sigma: scale (> 0)
-    - p: quantile/skewness parameter in (0, 1)
+    Parameters
+    - x: scalar evaluation point.
+    - mu: location parameter.
+    - sigma: positive scale parameter.
+    - p: quantile/skewness parameter in (0, 1).
 
-    Returns P(X <= x) for X ~ AL(mu, sigma, p).
+    Returns
+    - cdf: probability P(X <= x) for X ~ AL(mu, sigma, p).
+
+    Raises
+    - ValueError: if `p` is not in (0, 1) or `sigma` <= 0.
     """
     if not (0 < p < 1):
         raise ValueError("parameter p must be between 0 to 1")
@@ -97,10 +144,15 @@ def alcdf(x: float, mu: float, sigma: float, p: float) -> float:
 
 
 def _mvn_logpdf(x: np.ndarray, mean: np.ndarray, cov: np.ndarray) -> float:
-    """Log pdf of multivariate normal N(mean, cov) at vector x.
+    """Log-density of a multivariate normal distribution.
 
-    Shapes:
-    - x: (d,), mean: (d,), cov: (d, d)
+    Parameters
+    - x: (d,) array, evaluation point.
+    - mean: (d,) mean vector.
+    - cov: (d, d) symmetric positive-definite covariance matrix.
+
+    Returns
+    - logpdf: scalar log f(x | mean, cov).
     """
     x = np.asarray(x).reshape(-1)
     mean = np.asarray(mean).reshape(-1)
@@ -119,8 +171,17 @@ def _mvn_logpdf(x: np.ndarray, mean: np.ndarray, cov: np.ndarray) -> float:
 # ==============================================
 
 def _sample_inverse_gaussian(mu: float, lam: float) -> float:
-    """Sample from Inverse-Gaussian IG(mu, lambda) using the
-    Michael–Schucany–Haas method.
+    """Sample from an Inverse-Gaussian distribution IG(mu, lambda).
+
+    Parameters
+    - mu: mean parameter (> 0).
+    - lam: shape parameter lambda (> 0).
+
+    Returns
+    - sample: one draw from IG(mu, lambda) via the Michael–Schucany–Haas method.
+
+    Raises
+    - ValueError: if `mu` or `lam` are not positive.
     """
     if mu <= 0 or lam <= 0:
         raise ValueError("IG parameters must be positive")
@@ -136,10 +197,17 @@ def _sample_inverse_gaussian(mu: float, lam: float) -> float:
 
 
 def _rgig_lambda_half(chi: float, psi: float) -> float:
-    """Sample from GIG(lambda=+1/2, chi, psi).
+    """Sample from a GIG distribution with lambda = +1/2.
 
-    Relation: If X ~ GIG(1/2, chi, psi), then Y = 1/X ~ IG(muY, lambdaY)
-    where muY = sqrt(psi/chi), lambdaY = psi. We sample Y and return X = 1/Y.
+    Parameters
+    - chi: non-negative parameter (> 0 in practice; small values will be clipped).
+    - psi: positive parameter (> 0; small values will be clipped).
+
+    Returns
+    - sample: one draw from GIG(1/2, chi, psi).
+
+    Notes
+    - Uses the identity: If X ~ GIG(1/2, chi, psi), then Y = 1/X ~ IG( sqrt(psi/chi), psi ).
     """
     eps = 1e-12
     chi = max(chi, eps)
@@ -155,18 +223,22 @@ def _rgig_lambda_half(chi: float, psi: float) -> float:
 # ================================
 
 def qrnegLogLikensumOR1(y: np.ndarray, x: np.ndarray, beta: np.ndarray, delta: np.ndarray, p: float) -> Dict[str, np.ndarray]:
-    """Negative log-likelihood for each observation and their sum (OR1 model).
+    """Negative log-likelihood pieces for the OR1 model (J >= 3).
 
-    Inputs
-    - y: (n, 1) integer categories in {1, ..., J}
-    - x: (n, k)
-    - beta: (k,) or (k,1)
-    - delta: ((J-2),) or ((J-2),1), parameterization of cut-points
-    - p: quantile parameter in (0,1)
+    Parameters
+    - y: (n, 1) integer categories in {1, ..., J}.
+    - x: (n, k) covariate matrix.
+    - beta: (k,) vector of regression coefficients.
+    - delta: ((J-2),) vector parameterizing the interior cut-points via exp cum-sums.
+    - p: quantile parameter in (0, 1).
 
-    Returns dict with:
-    - nlogl: (n, 1) vector of negative log-likelihood per observation
-    - negsumlogl: scalar sum of negative log-likelihood
+    Returns
+    - dict with keys:
+      - 'nlogl': (n, 1) vector of negative log-likelihood per observation.
+      - 'negsumlogl': scalar, the sum over i of nlogl[i].
+
+    Raises
+    - ValueError: if `p` is not in (0, 1) or `y` has non-integers.
     """
     if not (0 < p < 1):
         raise ValueError("parameter p must be between 0 to 1")
@@ -228,11 +300,32 @@ def qrminfundtheorem(
     sw: int,
     p: float,
 ) -> Dict[str, np.ndarray]:
-    """Minimize negative log-likelihood w.r.t. delta using finite differences.
+    """Minimize the negative log-likelihood with respect to delta.
 
-    This implements the procedure described in the R function `qrminfundtheorem`.
-    It computes gradient and Hessian using central differences and updates delta
-    using a combination of BHHH and Newton steps.
+    Uses finite-difference gradients and Hessian to update `delta` using a
+    convex combination of BHHH and Newton steps (following the R function).
+
+    Parameters
+    - delta_in: initial delta vector ((J-2),).
+    - y: (n, 1) integer categories 1..J.
+    - x: (n, k) covariate matrix.
+    - beta: (k,) coefficient vector used during optimization.
+    - cri0: initial convergence criterion value.
+    - cri1: stopping threshold; smaller means stricter convergence.
+    - stepsize: learning rate for parameter updates.
+    - maxiter: maximum number of iterations.
+    - h: finite-difference step for first derivatives.
+    - dh: finite-difference step for second derivatives.
+    - sw: iteration number at which to switch from BHHH to Newton steps.
+    - p: quantile parameter in (0, 1).
+
+    Returns
+    - dict with keys:
+      - 'deltamin': minimizing delta vector.
+      - 'negsum': negative sum of log-likelihood at deltamin.
+      - 'logl': (n, 1) log-likelihood contributions at deltamin.
+      - 'G': (n, d) gradient matrix (per-observation scores).
+      - 'H': (d, d) Hessian matrix (symmetric).
     """
     _assert_numeric_array("deltaIn", delta_in)
     y = _as_matrix(y)
@@ -332,9 +425,22 @@ def drawbetaOR1(
     invB0: np.ndarray,
     invB0b0: np.ndarray,
 ) -> Dict[str, np.ndarray]:
-    """Sample beta from its conditional posterior (multivariate normal).
+    """Sample beta | z, w via a multivariate normal.
 
-    z: (n,1), x: (n,k), w: (n,1)
+    Parameters
+    - z: (n, 1) latent continuous responses.
+    - x: (n, k) design matrix.
+    - w: (n, 1) latent weights from the GIG mixture.
+    - tau2: scalar, 2 / (p (1 - p)).
+    - theta: scalar, (1 - 2 p) / (p (1 - p)).
+    - invB0: (k, k) prior precision matrix.
+    - invB0b0: (k,) product invB0 @ b0.
+
+    Returns
+    - dict with keys:
+      - 'beta': (k,) sampled coefficients.
+      - 'Btilde': (k, k) posterior covariance.
+      - 'btilde': (k,) posterior mean.
     """
     _assert_numeric_array("z", z)
     _assert_numeric_array("x", x)
@@ -376,11 +482,18 @@ def drawwOR1(
     theta: float,
     indexp: float,
 ) -> np.ndarray:
-    """Sample latent weights w from GIG with lambda = 1/2.
+    """Sample latent weights w from GIG(1/2, chi_i, psi).
 
-    Each w_i ~ GIG(1/2, chi_i, psi) where
-      chi_i = ((z_i - x_i beta)^2) / tau2
-      psi   = (theta^2)/tau2 + 2
+    Parameters
+    - z: (n, 1) latent continuous responses.
+    - x: (n, k) design matrix.
+    - beta: (k,) coefficients.
+    - tau2: scalar = 2 / (p (1 - p)).
+    - theta: scalar = (1 - 2 p) / (p (1 - p)).
+    - indexp: kept for parity with R (always 0.5 here).
+
+    Returns
+    - w: (n, 1) vector of sampled latent weights.
     """
     _assert_numeric_array("z", z)
     _assert_numeric_array("x", x)
@@ -415,9 +528,19 @@ def drawlatentOR1(
     tau2: float,
     delta: np.ndarray,
 ) -> np.ndarray:
-    """Sample latent variable z from truncated normal per observation.
+    """Sample latent variable z from a univariate truncated normal.
 
-    Truncation bounds come from the cut-points implied by delta.
+    Parameters
+    - y: (n, 1) outcome categories 1..J.
+    - x: (n, k) design matrix.
+    - beta: (k,) coefficients.
+    - w: (n, 1) latent weights.
+    - theta: scalar (1 - 2 p) / (p (1 - p)).
+    - tau2: scalar 2 / (p (1 - p)).
+    - delta: ((J-2),) parameter that defines interior cut-points.
+
+    Returns
+    - z: (n, 1) latent continuous responses.
     """
     y = _as_matrix(y)
     x = _as_matrix(x)
@@ -469,10 +592,23 @@ def drawdeltaOR1(
     Dhat: np.ndarray,
     p: float,
 ) -> Dict[str, np.ndarray]:
-    """Random-walk Metropolis-Hastings for delta.
+    """Random-walk Metropolis–Hastings update for delta.
 
-    Proposal: delta1 ~ N(delta0, (tune^2) * Dhat)
-    Accept/Reject based on posterior kernel (likelihood + prior).
+    Parameters
+    - y: (n, 1) outcome categories 1..J.
+    - x: (n, k) design matrix.
+    - beta: (k,) current beta draw.
+    - delta0: ((J-2),) current delta.
+    - d0: ((J-2),) prior mean for delta.
+    - D0: ((J-2), (J-2)) prior covariance for delta.
+    - tune: scalar step-size multiplier.
+    - Dhat: ((J-2), (J-2)) negative inverse Hessian from maximization (scales proposal).
+    - p: quantile parameter in (0, 1).
+
+    Returns
+    - dict with keys:
+      - 'deltareturn': ((J-2),) accepted (or retained) delta.
+      - 'accept': 0/1 acceptance indicator.
     """
     y = _as_matrix(y)
     x = _as_matrix(x)
@@ -513,9 +649,24 @@ def dicOR1(
     mcmc: int,
     p: float,
 ) -> Dict[str, float]:
-    """Deviance Information Criterion (DIC) for OR1.
+    """Compute Deviance Information Criterion (DIC) for OR1.
 
-    Returns dict with keys 'DIC', 'pd', 'dev'.
+    Parameters
+    - y: (n, 1) outcome categories 1..J.
+    - x: (n, k) design matrix.
+    - betadraws: (k, nsim) matrix of beta draws.
+    - deltadraws: ((J-2), nsim) matrix of delta draws.
+    - postMeanbeta: (k,) posterior mean of beta.
+    - postMeandelta: ((J-2),) posterior mean of delta.
+    - burn: number of initial iterations to discard.
+    - mcmc: number of post-burn iterations.
+    - p: quantile parameter in (0, 1).
+
+    Returns
+    - dict with keys:
+      - 'DIC': deviance information criterion.
+      - 'pd': effective number of parameters.
+      - 'dev': deviance at posterior means.
     """
     y = _as_matrix(y)
     x = _as_matrix(x)
@@ -541,9 +692,14 @@ def dicOR1(
 
 
 def _acf(series: np.ndarray, maxlags: int) -> np.ndarray:
-    """Compute autocorrelation function up to maxlags (inclusive).
+    """Compute the sample autocorrelation function up to `maxlags`.
 
-    Returns an array a[0..maxlags], where a[0] = 1.
+    Parameters
+    - series: 1D array of draws.
+    - maxlags: maximum lag (inclusive).
+
+    Returns
+    - ac: 1D array of length `maxlags + 1`; ac[0] = 1.
     """
     x = np.asarray(series).reshape(-1)
     x = x - np.mean(x)
@@ -568,9 +724,18 @@ def ineffactorOR1(
     maxlags: int = 400,
     verbose: bool = True,
 ) -> np.ndarray:
-    """Compute inefficiency factors using batch-means.
+    """Compute inefficiency factors using the batch-means method.
 
-    Returns a column vector of length k + (J-2): inefficiency for each beta and delta.
+    Parameters
+    - x: (n, k) design matrix (used only to extract column names upstream; unused here).
+    - betadraws: (k, nsim) beta draws.
+    - deltadraws: ((J-2), nsim) delta draws.
+    - accutoff: ACF cutoff threshold (default 0.05).
+    - maxlags: maximum lag for ACF (default 400).
+    - verbose: unused here (kept for parity).
+
+    Returns
+    - ineff: (k + J - 2, 1) column vector of inefficiency factors for beta then delta.
     """
     betadraws = _as_matrix(betadraws)
     deltadraws = _as_matrix(deltadraws)
@@ -620,10 +785,19 @@ def covEffectOR1(
     p: float,
     verbose: bool = True,
 ) -> Dict[str, np.ndarray]:
-    """Average covariate effect across outcome categories (OR1 model).
+    """Average covariate effect (ACE) over outcome categories (OR1).
 
-    The effect is the change in predicted category probabilities between xMat2
-    and xMat1, averaged over MCMC draws (post burn-in) and observations.
+    Parameters
+    - modelOR1: dict output from `quantregOR1` containing MCMC draws.
+    - y: (n, 1) outcome vector.
+    - xMat1: (n, k) baseline design matrix.
+    - xMat2: (n, k) modified design matrix (e.g., covariate shifted).
+    - p: quantile parameter in (0, 1).
+    - verbose: unused here; kept for parity.
+
+    Returns
+    - dict with key:
+      - 'avgDiffProb': (J, 1) average change in predicted probabilities for categories 1..J.
     """
     xMat1 = _as_matrix(xMat1)
     xMat2 = _as_matrix(xMat2)
@@ -687,12 +861,33 @@ def logMargLikeOR1(
     Dhat: np.ndarray,
     p: float,
     verbose: bool,
-) -> float:
-    """Estimate log marginal likelihood following the R code structure.
+    random_state: Optional[int] = None,
+    ) -> float:
+    """Estimate the log marginal likelihood using Chib–Jeliazkov (2001).
 
-    This uses outputs from a complete run and a reduced run to build the
-    posterior ordinate terms for beta and delta.
+    Parameters
+    - y: (n, 1) outcome categories 1..J.
+    - x: (n, k) design matrix.
+    - b0: (k, 1) or (k,) prior mean of beta.
+    - B0: (k, k) prior covariance of beta.
+    - d0: ((J-2), 1) or ((J-2),) prior mean of delta.
+    - D0: ((J-2), (J-2)) prior covariance of delta.
+    - postMeanbeta: (k,) posterior mean of beta from complete run.
+    - postMeandelta: ((J-2),) posterior mean of delta from complete run.
+    - betadraws: (k, nsim) full-run beta draws.
+    - deltadraws: ((J-2), nsim) full-run delta draws.
+    - tune: scalar proposal scale.
+    - Dhat: ((J-2), (J-2)) negative inverse Hessian used for proposals.
+    - p: quantile parameter in (0, 1).
+    - verbose: flag to print progress (unused here).
+    - random_state: optional integer seed for reproducibility.
+
+    Returns
+    - logMargLike: scalar estimate of log marginal likelihood.
     """
+    if random_state is not None:
+        np.random.seed(int(random_state))
+
     x = _as_matrix(x)
     y = _as_matrix(y)
     betadraws = _as_matrix(betadraws)
@@ -720,11 +915,13 @@ def logMargLikeOR1(
     betaStoreRedrun = np.zeros((k, nsim))
     btildeStoreRedrun = np.zeros((k, nsim))
     BtildeStoreRedrun = np.zeros((k, k, nsim))
-    deltaStoreRedrun = np.zeros((1, nsim))  # stores proposal density for delta draws
+    # Store proposal delta vectors drawn from q(delta* -> delta)
+    deltaPropRed = np.zeros((postMeandelta.shape[0], nsim))
 
     # Reduced run: sample beta, w, z while holding delta at postMeandelta
     w = np.abs(np.random.normal(loc=2.0, scale=1.0, size=(n, 1)))
     z = np.random.normal(size=(n, 1))
+    Lprop = cholesky((tune ** 2) * Dhat)
     for i in range(nsim):
         bd = drawbetaOR1(z, x, w, tau2, theta, invB0, invB0b0)
         betaStoreRedrun[:, i] = bd["beta"]
@@ -732,10 +929,8 @@ def logMargLikeOR1(
         BtildeStoreRedrun[:, :, i] = bd["Btilde"]
         w = drawwOR1(z, x, betaStoreRedrun[:, i], tau2, theta, indexp)
         z = drawlatentOR1(y, x, betaStoreRedrun[:, i], w, theta, tau2, postMeandelta)
-        # delta proposal density at deltadraws[:, i] under N(postMeandelta, tune^2 * Dhat)
-        deltaStoreRedrun[0, i] = math.exp(
-            _mvn_logpdf(deltadraws[:, i], postMeandelta, (tune ** 2) * Dhat)
-        )
+        # draw a proposal delta from q(delta* -> delta)
+        deltaPropRed[:, i] = postMeandelta + Lprop @ np.random.normal(size=postMeandelta.shape[0])
 
     # Build posterior ordinate terms
     j = 0
@@ -753,9 +948,9 @@ def logMargLikeOR1(
         qpdf = math.exp(_mvn_logpdf(postMeandelta, deltadraws[:, i], (tune ** 2) * Dhat))
         postOrddeltanum[j, 0] = E1alphaMH * qpdf
 
-        E2_num = qrnegLogLikensumOR1(y, x, betaStoreRedrun[:, i], deltaStoreRedrun[:, i], p)
+        E2_num = qrnegLogLikensumOR1(y, x, betaStoreRedrun[:, i], deltaPropRed[:, i], p)
         E2_den = qrnegLogLikensumOR1(y, x, betaStoreRedrun[:, i], postMeandelta, p)
-        E2_logNum = -E2_num["negsumlogl"] + _mvn_logpdf(deltaStoreRedrun[:, i], d0, D0)
+        E2_logNum = -E2_num["negsumlogl"] + _mvn_logpdf(deltaPropRed[:, i], d0, D0)
         E2_logDen = -E2_den["negsumlogl"] + _mvn_logpdf(postMeandelta, d0, D0)
         postOrddeltaden[j, 0] = min(1.0, math.exp(E2_logNum - E2_logDen))
 
@@ -796,9 +991,35 @@ def quantregOR1(
     maxlags: int = 400,
     verbose: bool = True,
 ) -> Dict[str, np.ndarray]:
-    """Bayesian quantile regression in the OR1 model.
+    """Bayesian quantile regression for ordinal outcomes with J >= 3 (OR1).
 
-    This closely follows the structure of the R function `quantregOR1`.
+    Parameters
+    - y: (n, 1) integer categories 1..J.
+    - x: (n, k) design matrix (include a column of ones if you want an intercept).
+    - b0: (k, 1) or (k,) prior mean for beta.
+    - B0: (k, k) prior covariance for beta.
+    - d0: ((J-2), 1) or ((J-2),) prior mean for delta.
+    - D0: ((J-2), (J-2)) prior covariance for delta.
+    - burn: number of burn-in iterations.
+    - mcmc: number of post burn-in iterations.
+    - p: quantile level in (0, 1).
+    - tune: MH proposal scaling for delta (default 0.1).
+    - accutoff: ACF cutoff used in inefficiency factor (default 0.05).
+    - maxlags: maximum lag for ACF (default 400).
+    - verbose: print summary at the end (default True).
+
+    Returns
+    - dict with keys similar to the R package output:
+      - 'summary': stacked summary for beta then delta: mean, sd, 97.5%, 2.5%, ineff.
+      - 'postMeanbeta', 'postStdbeta': (k, 1).
+      - 'postMeandelta', 'postStddelta': ((J-2), 1).
+      - 'gammacp': (J-1, 1) cut-points at posterior mean.
+      - 'catprob': (J,) category probabilities at x=mean(x) and beta=postMeanbeta.
+      - 'acceptancerate': MH acceptance rate for delta in percent.
+      - 'dicQuant': dict with DIC results.
+      - 'logMargLike': scalar log marginal likelihood estimate.
+      - 'ineffactor': (k+J-2, 1) inefficiency factors.
+      - 'betadraws': (k, nsim), 'deltadraws': ((J-2), nsim).
     """
     # Input checks and basic setup
     x = _as_matrix(x)
@@ -820,6 +1041,8 @@ def quantregOR1(
         raise ValueError("parameter tune must be greater than 0")
 
     J = _unique_sorted_levels(y).shape[0]
+    if J < 3:
+        raise ValueError("OR1 requires J >= 3 outcome categories")
     n, k = x.shape
     if D0.shape != (J - 2, J - 2):
         raise ValueError("D0 must have size (J-2)x(J-2)")
@@ -978,6 +1201,12 @@ def quantregOR1(
 
 # Optional: small helper to pretty-print a summary like the R S3 method
 def summary_bqrorOR1(result: Dict[str, np.ndarray], digits: int = 4) -> None:
+    """Pretty-print the `summary` matrix from a `quantregOR1` result.
+
+    Parameters
+    - result: dict returned by `quantregOR1`.
+    - digits: number of decimal places to show (default 4).
+    """
     arr = np.asarray(result["summary"])
     with np.printoptions(precision=digits, suppress=True):
         print(arr)

@@ -1,15 +1,8 @@
 # glmplus
 
-`glmplus` is a Python package (working under construction) that extends traditional Generalized Linear Models (GLMs) to support statistically robust and practically useful variants that are not currently available in mainstream Python libraries.
+`glmplus` is a lightweight Python toolbox for extended Generalized Linear Models (GLMs) beyond the standard offerings. It focuses on practical, statistically grounded methods with clear APIs.
 
-Key features:
-- 🟣 Now it supports: Rare Events Logistic Regression (`Relogit`) with finite-sample bias correction
-- 🔵 Firth Penalized Logistic Regression (for small samples / separation)
-- 🟢 Zero-Inflated Models (ZIP, ZINB)
-- 🟠 Case-control correction for sampling imbalance
-- 🟡 Survey-weighted GLMs (planned)
-- 🧩 Compatible with scikit-learn-style APIs
+Currently included models: 
+- Bayesian quantile regression for ordinal outcomes with J ≥ 3 (OR1, translated from the R package bqror) in `glm_plus/ordinal_quantile_regression/ori.py`, and
+- Rare events logistic regression (`Relogit`), Firth penalized logistic regression, and zero-inflated count models (`ZIP`, `ZINB`) (work in progress).
 
-Whether you're conducting applied research in social science, epidemiology, or any domain involving class imbalance or nonstandard count data, **glmplus** helps you obtain reliable and interpretable models beyond the defaults.
-
-> Inspired by the [Zelig](http://docs.zeligproject.org/articles/zelig_relogit.html) framework in R and the methodological work by King & Zeng (2001).

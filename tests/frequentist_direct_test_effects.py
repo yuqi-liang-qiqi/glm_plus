@@ -18,9 +18,24 @@ from glm_plus.frequentist.torque import FrequentistOQR
 from matplotlib import pyplot as plt
 
 # ==================== 常量与配置 ====================
-# 分位点集合（底/中/顶）。如需更细分位点，可扩展此元组
-QUANTILES_MAIN = (0.2, 0.5, 0.8)
+# 分位点集合：细化到 0.1..0.9（含 9 个点），便于 granularity 分析
+# QUANTILES_MAIN = (0.2, 0.5, 0.8)
+QUANTILES_MAIN = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 ORDER_LABELS = ["Assistant/Junior", "Regular", "Leader", "Chief/Founder"]
+
+# Granularity 带区与对比对设置
+BANDS_DEF = {
+    'low': (0.1, 0.2),
+    'low_mid': (0.3, 0.4),
+    'mid': (0.5,),
+    'mid_high': (0.6, 0.7),
+    'high': (0.8, 0.9),
+}
+COMPARE_PAIRS = (
+    ('mid', 'low'),
+    ('mid', 'high'),
+    ('low', 'high'),
+)
 
 # 估计对象（estimand）与二阶段开关
 # - 'single_index': 关闭 two-index，只在 h(Y) 尺子上抽系数（解释最直观）
@@ -44,6 +59,9 @@ N_PERMUTATION_DEFAULT = 0
 # —— 概率差阈值（可解释量纲）：至少 2 个百分点 ——
 PROB_DIFF_THRESHOLD = 0.02
 
+# 是否在保存后显示图窗（在终端运行时会阻塞），默认不显示
+SHOW_FIG = False
+
 # 简单进度日志函数（按步骤打印，便于初学者理解）
 def _log(msg: str) -> None:
     print(f"[Progress] {msg}")
@@ -65,8 +83,8 @@ def fit_model(X: np.ndarray, y: np.ndarray, taus=QUANTILES_MAIN, random_state: i
         use_two_index=False,
         auto_select_k=True,
         subsample_n=int(subsample_dynamic),
-        rank_grid_n=31,
-        t_grid_n=41,
+        rank_grid_n=25,
+        t_grid_n=31,
         random_state=random_state,
         qr_p_tol=QR_P_TOL,
     )
@@ -75,7 +93,7 @@ def fit_model(X: np.ndarray, y: np.ndarray, taus=QUANTILES_MAIN, random_state: i
 
 # ==================== Step 1: 读取数据 ====================
 _log("[1/3] 读取数据并清洗类别/哑元...")
-_DATA_DIR = _os.path.dirname(__file__)
+_DATA_DIR = "/Users/lei/Documents/Sequenzo_all_folders/sequenzo_local/test_data/real_data_my_paper/"
 _CSV_PATH = _os.path.join(_DATA_DIR, "df_seniority.csv")
 assert _os.path.exists(_CSV_PATH), f"找不到数据文件: {_CSV_PATH}"
 df_seniority = pd.read_csv(_CSV_PATH)
@@ -276,10 +294,12 @@ def _p_from_sign_two_sided(samples):
     return float(2.0 * min(np.mean(arr >= 0.0), np.mean(arr <= 0.0)))
 
 # ==================== Step 3: 按国家提取“female 分位系数 + CI” ====================
-def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP_DEFAULT, random_state: int = 0) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    female_coef_rows = []            # 点估
-    female_coef_boot_rows = []       # Bootstrap CI
-    delta_rows = []                  # 国家级 Δ 兜底汇总
+def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP_DEFAULT, random_state: int = 0) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    female_coef_rows = []            # 点估（逐 τ）
+    female_coef_boot_rows = []       # Bootstrap CI（逐 τ）
+    band_rows = []                   # 带区聚合（low/low_mid/mid/mid_high/high）
+    band_compare_rows = []           # 带区对比（mid-vs-low、mid-vs-high、low-vs-high）
+    delta_rows = []                  # 国家级 Δ 兜底汇总（底 vs 顶，用于与旧口径对比）
 
     print("=== 按国家抽取 being female 的分位系数（含95% bootstrap CI）===")
     print("[note] 本分析矩阵不含常数列（拦截项），female 系数为相对无截距线性项的边际效应。")
@@ -292,6 +312,10 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
             print(f"{ctry}: 跳过 (n={n} < {min_n})")
             continue
         print(f"{ctry}: 拟合模型并记录点估 (n={n})…")
+        # 若 female 列不存在或无变异，直接跳过（避免无意义的 bootstrap 与 Δ 判定）
+        if ('female' not in Xdf.columns) or (Xdf['female'].nunique() < 2):
+            print(f"[warn] 跳过：{ctry} 的 female 列不存在或无变异")
+            continue
 
         # 1) 拟合主模型并记录点估曲线
         m = fit_model(Xg, yg, taus=QUANTILES_MAIN, random_state=int(random_state))
@@ -309,18 +333,18 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
         # 2) Bootstrap：固定 h/g，仅对 QR 抽样系数（一次拟合 + 抽样）
         print(f"{ctry}: 进行 bootstrap（{int(n_bootstrap)} 次，固定 h/g，仅 QR 重估）以构造 CI…")
         seed = int(hashlib.md5(str(ctry).encode()).hexdigest()[:8], 16) + int(random_state)
-        TAUS_FOR_BOOT = (min(QUANTILES_MAIN), max(QUANTILES_MAIN))
-        q_low, q_high = TAUS_FOR_BOOT
+        TAUS_FOR_BOOT = tuple(QUANTILES_MAIN)
+        q_low, q_high = (min(QUANTILES_MAIN), max(QUANTILES_MAIN))
         female_idx = int(Xdf.columns.get_loc('female'))
         boot = m.bootstrap_inference(n_boot=int(n_bootstrap), random_state=seed, return_coefs=True)
         # 常见返回：beta_tau[tau]['draws'] -> (n_boot, n_params)
-        coef_boot = {tau: [] for tau in TAUS_FOR_BOOT}
+        coef_boot = {float(tau): [] for tau in TAUS_FOR_BOOT}
         delta_boot = []
         for tau in TAUS_FOR_BOOT:
             draws = boot.get('beta_tau', {}).get(float(tau), {}).get('draws', None)
             if draws is None:
                 continue
-            coef_boot[tau] = list(np.asarray(draws)[:, female_idx].reshape(-1))
+            coef_boot[float(tau)] = list(np.asarray(draws)[:, female_idx].reshape(-1))
         if (q_low in coef_boot) and (q_high in coef_boot) and len(coef_boot[q_low]) > 0 and len(coef_boot[q_high]) > 0:
             a = np.asarray(coef_boot[q_high], dtype=float)
             b = np.asarray(coef_boot[q_low], dtype=float)
@@ -551,6 +575,191 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
                 r.update({k: v for k, v in delta_row.items() if k not in r})
             # 国家级 Δ 行收集
             delta_rows.append(delta_row)
+
+            # 3.2) Granularity: 带区聚合（均值）与三对对比
+            # 带区聚合点估
+            # 先构建 τ->点估 的映射
+            point_map: Dict[float, float] = {
+                float(r['tau']): float(r['female_coef_point'])
+                for r in female_coef_rows if r['country'] == str(ctry) and r['n'] == n and np.isfinite(r.get('female_coef_point', np.nan))
+            }
+            # 构建 τ->bootstrap 抽样（每个 τ 的 female 系数）
+            boot_map: Dict[float, np.ndarray] = {}
+            for t in TAUS_FOR_BOOT:
+                samples = coef_boot.get(float(t), [])
+                if samples:
+                    boot_map[float(t)] = np.asarray(samples, dtype=float).reshape(-1)
+            # 预先计算 band 内的概率尺度 Δ_prob（使用 tau_grid 中落在 band 的点）
+            band_to_delta_prob: Dict[str, float] = {}
+            band_to_probs: Dict[str, Dict[str, float]] = {}
+            # 预先计算基于 hy 的 rq_model（避免重复构建）
+            try:
+                rq_model_global = sm.QuantReg(hy, Xg)
+            except Exception:
+                rq_model_global = None
+            # 先计算一次 y0_arr, y1_arr（用 41 点），后续按 band 过滤
+            tau_grid_all = np.linspace(0.02, 0.98, 41)
+            y0_arr = None; y1_arr = None
+            try:
+                x_rep = np.asarray(Xdf.mean(), dtype=float).reshape(-1)
+                x0 = x_rep.copy(); x1 = x_rep.copy()
+                x0[female_idx] = 0.0; x1[female_idx] = 1.0
+                y0_list = []; y1_list = []
+                if rq_model_global is not None:
+                    for t in tau_grid_all:
+                        try:
+                            rq = rq_model_global.fit(q=float(t), max_iter=5000, p_tol=QR_P_TOL)
+                        except TypeError:
+                            rq = rq_model_global.fit(q=float(t), max_iter=5000)
+                        b = np.asarray(rq.params, dtype=float).reshape(-1)
+                        hy0 = float(x0 @ b); hy1 = float(x1 @ b)
+                        y0_list.append(float(m._hinv(np.array([hy0]))[0]))
+                        y1_list.append(float(m._hinv(np.array([hy1]))[0]))
+                    y0_arr = np.asarray(y0_list, dtype=float)
+                    y1_arr = np.asarray(y1_list, dtype=float)
+            except Exception:
+                y0_arr = None; y1_arr = None
+            j_min = int(m._y_min_cat) if m._y_min_cat is not None else int(np.nanmin(yg))
+            j_max = int(m._y_max_cat) if m._y_max_cat is not None else int(np.nanmax(yg))
+
+            def _band_prob_metrics(low_tau: float, high_tau: float) -> Dict[str, float]:
+                out = {'prob_bottom_f0': np.nan, 'prob_bottom_f1': np.nan, 'prob_top_f0': np.nan, 'prob_top_f1': np.nan, 'delta_prob': np.nan}
+                if (y0_arr is None) or (y1_arr is None):
+                    return out
+                mask = (tau_grid_all >= float(low_tau) - 1e-12) & (tau_grid_all <= float(high_tau) + 1e-12)
+                if not np.any(mask):
+                    return out
+                y0b = y0_arr[mask]; y1b = y1_arr[mask]; taus = tau_grid_all[mask]
+                m0b = (y0b <= float(j_min) + 1e-9)
+                m1b = (y1b <= float(j_min) + 1e-9)
+                prob_bottom_f0 = float(np.max(taus[m0b])) if np.any(m0b) else 0.0
+                prob_bottom_f1 = float(np.max(taus[m1b])) if np.any(m1b) else 0.0
+                m0tcdf = (y0b <= float(j_max - 1) + 1e-9)
+                m1tcdf = (y1b <= float(j_max - 1) + 1e-9)
+                F0_topm1 = float(np.max(taus[m0tcdf])) if np.any(m0tcdf) else 0.0
+                F1_topm1 = float(np.max(taus[m1tcdf])) if np.any(m1tcdf) else 0.0
+                prob_top_f0 = float(1.0 - F0_topm1)
+                prob_top_f1 = float(1.0 - F1_topm1)
+                delta_prob_b = (prob_bottom_f1 - prob_bottom_f0) - (prob_top_f1 - prob_top_f0)
+                out.update({'prob_bottom_f0': prob_bottom_f0, 'prob_bottom_f1': prob_bottom_f1,
+                            'prob_top_f0': prob_top_f0, 'prob_top_f1': prob_top_f1,
+                            'delta_prob': float(delta_prob_b)})
+                return out
+
+            # 逐 band 聚合
+            band_points: Dict[str, float] = {}
+            band_draws: Dict[str, np.ndarray] = {}
+            for band_name, band_taus in BANDS_DEF.items():
+                taus_in_band = [float(t) for t in band_taus]
+                # 点估：同带 τ 的平均
+                vals = [point_map.get(float(t), np.nan) for t in taus_in_band]
+                vals = [v for v in vals if np.isfinite(v)]
+                point_band = float(np.mean(vals)) if len(vals) > 0 else np.nan
+                band_points[band_name] = point_band
+                # 抽样：对每个 τ 的抽样先堆叠，再按列平均
+                sample_mats = []
+                for t in taus_in_band:
+                    s = boot_map.get(float(t), None)
+                    if s is not None and s.size > 0:
+                        sample_mats.append(s.reshape(1, -1))
+                if len(sample_mats) > 0:
+                    S = np.vstack(sample_mats)  # shape: (#taus_in_band, n_boot)
+                    draws_band = np.nanmean(S, axis=0).reshape(-1)  # n_boot,
+                else:
+                    draws_band = np.array([], dtype=float)
+                band_draws[band_name] = draws_band
+                lo_b, hi_b, sig_b = _ci_from_samples(draws_band, level=0.95)
+                p_b = _p_from_sign_two_sided(draws_band)
+                # 概率尺度（该 band 的 Δ_prob）
+                if len(band_taus) == 1:
+                    low_t, high_t = float(band_taus[0]), float(band_taus[0])
+                else:
+                    low_t, high_t = float(min(band_taus)), float(max(band_taus))
+                prob_metrics = _band_prob_metrics(low_t, high_t)
+                band_to_delta_prob[band_name] = prob_metrics['delta_prob']
+                band_to_probs[band_name] = prob_metrics
+                band_rows.append({
+                    'country': str(ctry), 'n': n, 'band': band_name,
+                    'taus': ','.join([str(t) for t in taus_in_band]),
+                    'female_coef_point_band': point_band,
+                    'female_coef_ci_low_band': lo_b, 'female_coef_ci_high_band': hi_b,
+                    'female_coef_sig_band': bool(sig_b), 'female_coef_p_boot_band': float(p_b),
+                    'delta_prob_band': float(prob_metrics['delta_prob']),
+                    'prob_bottom_female0_band': float(prob_metrics['prob_bottom_f0']),
+                    'prob_bottom_female1_band': float(prob_metrics['prob_bottom_f1']),
+                    'prob_top_female0_band': float(prob_metrics['prob_top_f0']),
+                    'prob_top_female1_band': float(prob_metrics['prob_top_f1']),
+                    'hy_sd': hy_sd, 'epsilon': epsilon, 'epsilon_mode': epsilon_mode,
+                })
+
+            # 三对对比 + Holm 校正
+            pair_rows_tmp = []
+            for a, b in COMPARE_PAIRS:
+                da = band_draws.get(a, np.array([], dtype=float))
+                db = band_draws.get(b, np.array([], dtype=float))
+                if da.size == 0 or db.size == 0:
+                    diff_draws = np.array([], dtype=float)
+                else:
+                    diff_draws = (da - db).reshape(-1)
+                lo_d, hi_d, sig_d = _ci_from_samples(diff_draws, level=0.95)
+                p_d = _p_from_sign_two_sided(diff_draws) if diff_draws.size > 0 else np.nan
+                point_d = float(band_points.get(a, np.nan) - band_points.get(b, np.nan))
+                delta_prob_diff = float(band_to_delta_prob.get(a, np.nan) - band_to_delta_prob.get(b, np.nan))
+                # 阈值判定
+                above_eps_pair = (np.isfinite(point_d) and np.isfinite(epsilon) and abs(point_d) >= float(epsilon))
+                meets_prob_pair = (np.isfinite(delta_prob_diff) and abs(delta_prob_diff) >= float(PROB_DIFF_THRESHOLD))
+                cls_pair = 'no_heterogeneity'
+                reason_pair = '规则未触发显著差异'
+                if sig_d and above_eps_pair and meets_prob_pair and point_d > 0 and (delta_prob_diff > 0):
+                    cls_pair = f'{a}_more_sticky_vs_{b}'; reason_pair = f'{a} 相对 {b} 更“底部不利”（均满足阈值）'
+                elif sig_d and above_eps_pair and meets_prob_pair and point_d < 0 and (delta_prob_diff < 0):
+                    cls_pair = f'{a}_more_glass_vs_{b}'; reason_pair = f'{a} 相对 {b} 更“顶部不利”（均满足阈值）'
+                elif sig_d and not above_eps_pair:
+                    cls_pair = 'diff_sig_but_small_effect'; reason_pair = '|差值| 低于 ε'
+                elif sig_d and above_eps_pair and not meets_prob_pair:
+                    cls_pair = 'diff_sig_but_small_prob_effect'; reason_pair = f'Δ_prob 差值 < {PROB_DIFF_THRESHOLD:.2f}'
+
+                rowp = {
+                    'country': str(ctry), 'n': n,
+                    'band_A': a, 'band_B': b,
+                    'diff_point': point_d,
+                    'diff_ci_low': lo_d, 'diff_ci_high': hi_d,
+                    'diff_sig': bool(sig_d), 'diff_p_boot': float(p_d) if np.isfinite(p_d) else np.nan,
+                    'delta_prob_diff': delta_prob_diff,
+                    'classification_pair': cls_pair,
+                    'reason_pair': reason_pair,
+                    'epsilon': epsilon, 'epsilon_mode': epsilon_mode,
+                }
+                pair_rows_tmp.append(rowp)
+            # Holm 校正（每国 3 次对比）
+            p_vals = [r['diff_p_boot'] for r in pair_rows_tmp if np.isfinite(r['diff_p_boot'])]
+            if len(p_vals) > 0:
+                m = len(pair_rows_tmp)
+                # sort by p ascending
+                order = sorted(range(m), key=lambda i: (pair_rows_tmp[i]['diff_p_boot'] if np.isfinite(pair_rows_tmp[i]['diff_p_boot']) else 1.0))
+                p_sorted = [pair_rows_tmp[i]['diff_p_boot'] if np.isfinite(pair_rows_tmp[i]['diff_p_boot']) else 1.0 for i in order]
+                p_adj_sorted = []
+                for j, pj in enumerate(p_sorted, start=1):
+                    p_adj_sorted.append(min((m - j + 1) * pj, 1.0))
+                # enforce monotonicity
+                for j in range(1, len(p_adj_sorted)):
+                    p_adj_sorted[j] = max(p_adj_sorted[j], p_adj_sorted[j - 1])
+                # assign back
+                for idx_pos, i in enumerate(order):
+                    pair_rows_tmp[i]['diff_p_boot_holm'] = float(p_adj_sorted[idx_pos])
+            # 基于 Holm 的更保守显著性标记
+            for r in pair_rows_tmp:
+                r['diff_sig_holm'] = (np.isfinite(r.get('diff_p_boot_holm', np.nan)) and float(r['diff_p_boot_holm']) < 0.05)
+                # 按“未校正CI显著 AND Holm显著”共同为真进入强结论
+                if r['diff_sig'] and r['diff_sig_holm']:
+                    pass  # 分类在上方已依据未校正CI；保留 reason_pair，不强改
+                else:
+                    # 若任一不显著，则若原分类为强结论则降级为 no_heterogeneity
+                    if r['classification_pair'] in (f'{a}_more_sticky_vs_{b}', f'{a}_more_glass_vs_{b}'):
+                        r['classification_pair'] = 'no_heterogeneity'
+                        r['reason_pair'] = 'Holm 未通过或 CI 未显著'
+            for r in pair_rows_tmp:
+                band_compare_rows.append(r)
         else:
             warn_rate = (float(warn_counter.get('warn_count', 0)) / float(warn_counter.get('fit_count', 1)))
             delta_row = {
@@ -595,10 +804,10 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
             )
         drop_cols = [c for c in ['female_coef_point_x', 'female_coef_point_y'] if c in female_coef_all.columns]
         female_coef_all = female_coef_all.drop(columns=drop_cols)
-    return female_coef_all, pd.DataFrame(delta_rows)
+    return female_coef_all, pd.DataFrame(delta_rows), pd.DataFrame(band_rows), pd.DataFrame(band_compare_rows)
 
 _log(f"[2/3] 开始分国家系数分析 (min_n=500, bootstrap={N_BOOTSTRAP_DEFAULT})…")
-female_coef_all, delta_df = analyze_by_country_detailed(min_n=500, n_bootstrap=N_BOOTSTRAP_DEFAULT)
+female_coef_all, delta_df, band_df, band_cmp_df = analyze_by_country_detailed(min_n=500, n_bootstrap=N_BOOTSTRAP_DEFAULT)
 
 print(f"\n完成！涵盖 {female_coef_all['country'].nunique() if len(female_coef_all) > 0 else 0} 个国家")
 print("\n=== being female 的分位系数（前10行）===")
@@ -625,6 +834,25 @@ if len(female_coef_all) > 0:
     out_csv2 = f'{OUTPUT_DIR}/female_coef_summary_by_country.csv'
     summary_df.to_csv(out_csv2, index=False)
     print(f"✓ 国家级汇总（Δ 与分类）已保存: {out_csv2}")
+    # 输出带区聚合与对比结果
+    if len(band_df) > 0:
+        out_csv3 = f'{OUTPUT_DIR}/female_coef_bands.csv'
+        band_df.to_csv(out_csv3, index=False)
+        print(f"✓ 带区聚合结果已保存: {out_csv3}")
+    if len(band_cmp_df) > 0:
+        out_csv4 = f'{OUTPUT_DIR}/female_coef_band_comparisons.csv'
+        band_cmp_df.to_csv(out_csv4, index=False)
+        print(f"✓ 带区对比结果已保存: {out_csv4}")
+        # 生成写作友好的“带区对比概览”宽表（附录用）
+        try:
+            cols_view = ['country','band_A','band_B','diff_point','diff_ci_low','diff_ci_high','diff_p_boot_holm','delta_prob_diff','classification_pair']
+            view_df = band_cmp_df.reindex(columns=[c for c in cols_view if c in band_cmp_df.columns]).copy()
+            # 可按国家透视为多列（可在后处理中继续美化），此处先直接导出长表视图
+            out_csv5 = f'{OUTPUT_DIR}/female_coef_band_comparisons_view.csv'
+            view_df.to_csv(out_csv5, index=False)
+            print(f"✓ 带区对比概览（长表）已保存: {out_csv5}")
+        except Exception:
+            pass
     print("[note] 附注：qr_warn_rate > 0.2 视为不稳定（high_warn=True）。")
 
     # 画每国一条曲线，并用阴影标出 95% CI
@@ -647,7 +875,10 @@ if len(female_coef_all) > 0:
     plt.tight_layout()
     fig_path = f'{OUTPUT_DIR}/female_coef_curve.png'
     plt.savefig(fig_path, dpi=300, bbox_inches='tight')
-    plt.show()
+    if SHOW_FIG:
+        plt.show()
+    else:
+        plt.close()
     print(f"✓ 系数曲线图已保存: {fig_path}")
 else:
     print("无可导出的系数结果。")

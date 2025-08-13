@@ -559,6 +559,7 @@ def drawlatentOR1(
     J = _unique_sorted_levels(y).shape[0]
     n = x.shape[0]
 
+    # Compute cut-point bounds for each category at current delta
     expdelta = np.exp(delta)
     q = expdelta.shape[0] + 1
     gammacp = np.zeros(q)
@@ -567,17 +568,31 @@ def drawlatentOR1(
     # Include -inf and +inf for convenience (1-based mapping like R)
     bounds = np.concatenate((np.array([-np.inf]), gammacp, np.array([np.inf])))
 
-    z = np.zeros((n, 1))
-    mu = x @ beta
-    for i in range(n):
-        meanp = float(mu[i] + theta * w[i, 0])
-        std = math.sqrt(tau2 * w[i, 0])
-        yi = int(y[i, 0])
-        a = bounds[yi - 1]
-        b = bounds[yi]
-        a_std = (a - meanp) / std if np.isfinite(a) else -np.inf
-        b_std = (b - meanp) / std if np.isfinite(b) else np.inf
-        z[i, 0] = truncnorm.rvs(a_std, b_std, loc=meanp, scale=std)
+    # Vectorized truncated normal sampling via inverse-CDF method
+    mu = (x @ beta).reshape(-1)
+    wv = w.reshape(-1)
+    meanp = mu + theta * wv
+    std = np.sqrt(tau2 * wv)
+
+    yi = y.reshape(-1).astype(int)
+    a = bounds[yi - 1]
+    b = bounds[yi]
+
+    # Standardized truncation limits
+    a_std = (a - meanp) / std
+    b_std = (b - meanp) / std
+
+    # Handle infinite bounds naturally: norm.cdf(-inf)=0, norm.cdf(+inf)=1
+    cdf_a = norm.cdf(a_std)
+    cdf_b = norm.cdf(b_std)
+
+    # Guard against extremely narrow intervals due to numerical issues
+    width = np.maximum(cdf_b - cdf_a, 1e-14)
+    u0 = np.random.random(size=n)
+    u = cdf_a + u0 * width
+    z_std = norm.ppf(u)
+
+    z = (meanp + std * z_std).reshape(-1, 1)
     return z
 
 

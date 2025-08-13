@@ -96,6 +96,35 @@ def _safe_log(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     return np.log(np.clip(x, eps, None))
 
 
+def _logsumexp(values: np.ndarray) -> float:
+    """Stable log-sum-exp for 1D array-like input.
+
+    Parameters
+    - values: 1D array-like of log-values.
+
+    Returns
+    - logsumexp: scalar log( sum_i exp(values[i]) ).
+    """
+    v = np.asarray(values, dtype=float).reshape(-1)
+    if v.size == 0:
+        return -np.inf
+    vmax = np.max(v)
+    if not np.isfinite(vmax):
+        return vmax
+    return float(vmax + np.log(np.sum(np.exp(v - vmax))))
+
+
+def _logmeanexp(values: np.ndarray) -> float:
+    """Stable log-mean-exp for 1D array-like input.
+
+    Returns log( mean_i exp(values[i]) ).
+    """
+    v = np.asarray(values, dtype=float).reshape(-1)
+    if v.size == 0:
+        return -np.inf
+    return float(_logsumexp(v) - math.log(v.size))
+
+
 def alcdfstd(x: float, p: float) -> float:
     """CDF of a standard Asymmetric Laplace distribution AL(0, 1, p).
 
@@ -269,9 +298,13 @@ def qrnegLogLikensumOR1(y: np.ndarray, x: np.ndarray, beta: np.ndarray, delta: n
         yi = int(y[i, 0])
         meanp = float(mu[i])
         if yi == 1:
-            lnpdf[i, 0] = math.log(alcdf(0.0, meanp, 1.0, p))
+            # Guard against underflow: log( max(F, eps) )
+            prob = alcdf(0.0, meanp, 1.0, p)
+            lnpdf[i, 0] = math.log(max(prob, 1e-300))
         elif yi == J:
-            lnpdf[i, 0] = math.log(1.0 - alcdf(allgammacp[J - 1], meanp, 1.0, p))
+            # Guard against round-to-one: log( max(1 - F, eps) )
+            tail = 1.0 - alcdf(allgammacp[J - 1], meanp, 1.0, p)
+            lnpdf[i, 0] = math.log(max(tail, 1e-300))
         else:
             upper = alcdf(allgammacp[yi], meanp, 1.0, p)      # yi+1 -> index yi (0-based)
             lower = alcdf(allgammacp[yi - 1], meanp, 1.0, p)  # yi   -> index yi-1
@@ -462,8 +495,13 @@ def drawbetaOR1(
     mean_sum = np.zeros(k)
     for i in range(n):
         xi = x[i, :].reshape(-1, 1)
-        var_sum += (xi @ xi.T) / (tau2 * w[i, 0])
-        mean_sum += (x[i, :] * (z[i, 0] - theta * w[i, 0])) / (tau2 * w[i, 0])
+        wi = float(w[i, 0])
+        zi = float(z[i, 0])
+        if not np.isfinite(wi) or wi <= 0.0 or not np.isfinite(zi):
+            continue
+        denom = tau2 * max(wi, 1e-12)
+        var_sum += (xi @ xi.T) / denom
+        mean_sum += (x[i, :] * (zi - theta * wi)) / denom
 
     Btilde = inv(invB0 + var_sum)
     btilde = Btilde @ (invB0b0.reshape(-1) + mean_sum)
@@ -514,7 +552,11 @@ def drawwOR1(
     w = np.zeros((n, 1))
     mu_vec = x @ beta
     for i in range(n):
-        chi_i = ((z[i, 0] - mu_vec[i]) ** 2) / tau2
+        zi = float(z[i, 0])
+        mui = float(mu_vec[i])
+        chi_i = ((zi - mui) ** 2) / tau2
+        if not np.isfinite(chi_i) or chi_i <= 0.0:
+            chi_i = 1e-12
         w[i, 0] = _rgig_lambda_half(chi_i, tildeeta)
     return w
 
@@ -571,8 +613,10 @@ def drawlatentOR1(
     # Vectorized truncated normal sampling via inverse-CDF method
     mu = (x @ beta).reshape(-1)
     wv = w.reshape(-1)
-    meanp = mu + theta * wv
-    std = np.sqrt(tau2 * wv)
+    eps = 1e-12
+    wv_safe = np.where(np.isfinite(wv) & (wv > eps), wv, eps)
+    meanp = mu + theta * wv_safe
+    std = np.sqrt(tau2 * wv_safe)
 
     yi = y.reshape(-1).astype(int)
     a = bounds[yi - 1]
@@ -585,11 +629,13 @@ def drawlatentOR1(
     # Handle infinite bounds naturally: norm.cdf(-inf)=0, norm.cdf(+inf)=1
     cdf_a = norm.cdf(a_std)
     cdf_b = norm.cdf(b_std)
+    cdf_a = np.clip(cdf_a, eps, 1.0 - eps)
+    cdf_b = np.clip(cdf_b, eps, 1.0 - eps)
 
     # Guard against extremely narrow intervals due to numerical issues
-    width = np.maximum(cdf_b - cdf_a, 1e-14)
+    width = np.maximum(cdf_b - cdf_a, eps)
     u0 = np.random.random(size=n)
-    u = cdf_a + u0 * width
+    u = np.clip(cdf_a + u0 * width, eps, 1.0 - eps)
     z_std = norm.ppf(u)
 
     z = (meanp + std * z_std).reshape(-1, 1)
@@ -959,7 +1005,9 @@ def logMargLikeOR1(
         E1_den = qrnegLogLikensumOR1(y, x, betadraws[:, i], deltadraws[:, i], p)
         E1_logNum = -E1_num["negsumlogl"] + _mvn_logpdf(postMeandelta, d0, D0)
         E1_logDen = -E1_den["negsumlogl"] + _mvn_logpdf(deltadraws[:, i], d0, D0)
-        E1alphaMH = min(1.0, math.exp(E1_logNum - E1_logDen))
+        # Numerically stable MH acceptance: min(1, exp(log_ratio)) without overflow
+        _log_ratio_E1 = E1_logNum - E1_logDen
+        E1alphaMH = 1.0 if _log_ratio_E1 >= 0 else math.exp(_log_ratio_E1)
         qpdf = math.exp(_mvn_logpdf(postMeandelta, deltadraws[:, i], (tune ** 2) * Dhat))
         postOrddeltanum[j, 0] = E1alphaMH * qpdf
 
@@ -967,7 +1015,9 @@ def logMargLikeOR1(
         E2_den = qrnegLogLikensumOR1(y, x, betaStoreRedrun[:, i], postMeandelta, p)
         E2_logNum = -E2_num["negsumlogl"] + _mvn_logpdf(deltaPropRed[:, i], d0, D0)
         E2_logDen = -E2_den["negsumlogl"] + _mvn_logpdf(postMeandelta, d0, D0)
-        postOrddeltaden[j, 0] = min(1.0, math.exp(E2_logNum - E2_logDen))
+        # Numerically stable MH acceptance for denominator leg
+        _log_ratio_E2 = E2_logNum - E2_logDen
+        postOrddeltaden[j, 0] = 1.0 if _log_ratio_E2 >= 0 else math.exp(_log_ratio_E2)
 
         postOrdbetaStore[j, 0] = math.exp(
             _mvn_logpdf(postMeanbeta, btildeStoreRedrun[:, i], BtildeStoreRedrun[:, :, i])

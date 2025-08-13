@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, Any, Sequence
+import warnings
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -9,8 +10,10 @@ from numpy.typing import ArrayLike
 try:
     # statsmodels for linear quantile regression
     import statsmodels.api as sm
+    from statsmodels.tools.sm_exceptions import IterationLimitWarning
 except Exception as _:
     sm = None  # handled at fit time
+    IterationLimitWarning = Warning  # type: ignore
 
 try:
     # scikit-learn for isotonic regression, CCA, and spline basis
@@ -81,6 +84,9 @@ class FrequentistOQR:
     t_grid_low: float = 0.05
     t_grid_high: float = 0.95
     subsample_n: Optional[int] = None
+    # Quantile regression solver controls
+    qr_max_iter: int = 5000
+    qr_p_tol: Optional[float] = None
 
     # learned attributes after fit
     is_fit_: bool = False
@@ -225,7 +231,7 @@ class FrequentistOQR:
             except Exception:
                 beta0 = None
         if beta0 is None:
-            rq0 = sm.QuantReg(y_jit, X).fit(q=0.5, weights=w)
+            rq0 = self._fit_qr(y_jit, X, q=0.5, weights=w)
             beta0 = rq0.params.reshape(-1)
 
         # Step 2: monotone transform h via rank-based objective (approximation to Eq. 11)
@@ -261,8 +267,9 @@ class FrequentistOQR:
             # sum_{i,j: S>=t} w_i w_j (A_i - B_j), exclude i==j
             M = (S >= t).astype(float)
             np.fill_diagonal(M, 0.0)
-            term1 = float((wi * A)[:, None] @ (wj * M).sum(axis=1, keepdims=True))
-            term2 = float((wj * B)[None, :] @ (wi[:, None] * M).sum(axis=0, keepdims=True).T)
+            # Scalar form: (wi*A)^T (M (wj)) - (wj*B)^T (M^T (wi))
+            term1 = float((wi * A) @ (M @ (wj)))
+            term2 = float((wj * B) @ (M.T @ (wi)))
             return term1 - term2
         h_vals = []
         for yl in y_levels:
@@ -287,7 +294,7 @@ class FrequentistOQR:
         # Step 3: fit quantile regressions for h(Y) on X (normalized: no separate alpha storage)
         hy_full = self.h_iso_.transform(self._y_jit)
         # 3a) enforce beta1 from median (tau=0.5), independent of user-specified quantiles
-        rq_med = sm.QuantReg(hy_full, X).fit(q=0.5, weights=w)
+        rq_med = self._fit_qr(hy_full, X, q=0.5, weights=w)
         self.beta1_ = rq_med.params.reshape(-1)
         # No explicit alpha1 stored; absorbed by h's location normalization
         self.alpha1_ = None
@@ -319,8 +326,9 @@ class FrequentistOQR:
                 B = (r1_rank >= e10).astype(float)
                 M = (S2 >= t).astype(float)
                 np.fill_diagonal(M, 0.0)
-                term1 = float((wi * A)[:, None] @ (wj * M).sum(axis=1, keepdims=True))
-                term2 = float((wj * B)[None, :] @ (wi[:, None] * M).sum(axis=0, keepdims=True).T)
+                # Scalar form: (wi*A)^T (M (wj)) - (wj*B)^T (M^T (wi))
+                term1 = float((wi * A) @ (M @ (wj)))
+                term2 = float((wj * B) @ (M.T @ (wi)))
                 return term1 - term2
             g_vals = []
             for rg in r_grid:
@@ -347,7 +355,7 @@ class FrequentistOQR:
             self.beta2_tau_ = {}
             beta2_med = None
             for t in taus:
-                rq = sm.QuantReg(r1g, X).fit(q=t, weights=w)
+                rq = self._fit_qr(r1g, X, q=t, weights=w)
                 self.beta2_tau_[float(t)] = rq.params.reshape(-1)
                 if abs(float(t) - 0.5) < 1e-9:
                     beta2_med = rq.params.reshape(-1)
@@ -575,6 +583,25 @@ class FrequentistOQR:
             out["beta2_tau_scaled"] = None
         return out
 
+    # --- Internal helper: centralized QuantReg fit with safe defaults/suppressed warnings ---
+    def _fit_qr(self, y: np.ndarray, X: np.ndarray, q: float, weights: Optional[np.ndarray]):
+        fit_kwargs: Dict[str, Any] = {"q": float(q)}
+        if weights is not None:
+            fit_kwargs["weights"] = weights
+        # pass solver controls if supported by current statsmodels version
+        try:
+            fit_kwargs["max_iter"] = int(self.qr_max_iter)
+        except Exception:
+            pass
+        if self.qr_p_tol is not None:
+            try:
+                fit_kwargs["p_tol"] = float(self.qr_p_tol)
+            except Exception:
+                pass
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", IterationLimitWarning)
+            return sm.QuantReg(y, X).fit(**fit_kwargs)
+
     def plot_transforms(self, ax=None):
         try:
             import matplotlib.pyplot as plt
@@ -656,7 +683,7 @@ class FrequentistOQR:
         out["corr_xbeta1_xbeta2"] = corr_diag
         return out
 
-    def bootstrap_inference(self, n_boot: int = 200, block_length: Optional[int] = None, ci: float = 0.95, random_state: Optional[int] = None) -> Dict[str, Any]:
+    def bootstrap_inference(self, n_boot: int = 200, block_length: Optional[int] = None, ci: float = 0.95, random_state: Optional[int] = None, return_coefs: bool = False) -> Dict[str, Any]:
         """
         Bootstrap standard errors and CIs for beta1 (q=0.5) and beta2,τ (if two-index).
 
@@ -665,6 +692,10 @@ class FrequentistOQR:
           within each bootstrap replicate. This captures QR-stage variability but not transform
           estimation variability.
         - If block_length is provided (>=1), uses moving block bootstrap on the training order.
+        - If return_coefs=True, also returns raw coefficient draws matrices under keys:
+          - 'beta1': {'draws': (n_boot, k), ...}
+          - 'beta2_tau': {tau: {'draws': (n_boot, k), ...}} when two-index is enabled
+          - 'beta_tau': {tau: {'draws': (n_boot, k), ...}} for QR of h(Y) on X at each tau in self.quantiles
         """
         if not self.is_fit_:
             raise RuntimeError("Model not fitted.")
@@ -696,6 +727,8 @@ class FrequentistOQR:
         b1_dim = self.beta1_.shape[0] if self.beta1_ is not None else X.shape[1]
         b1_boot = np.zeros((n_boot, b1_dim), dtype=float)
         b2_boot: Dict[float, np.ndarray] = {t: np.zeros((n_boot, X.shape[1]), dtype=float) for t in (taus if self.use_two_index else [])}
+        # QR of h(Y) on X at each tau (single-index style coefficients per tau)
+        beta_tau_boot: Dict[float, np.ndarray] = {t: np.zeros((n_boot, X.shape[1]), dtype=float) for t in taus}
 
         for b in range(n_boot):
             idx = draw_indices_blocks(int(block_length)) if (block_length is not None and int(block_length) >= 1) else draw_indices_iid()
@@ -704,13 +737,17 @@ class FrequentistOQR:
             wb = None if w is None else w[idx]
             # transform and first-stage QR
             hyb = self.h_iso_.transform(_jitter_ordinal(yb, random_state=rng.integers(0, 2**31 - 1)))  # jitter per replicate
-            rq1 = sm.QuantReg(hyb, Xb).fit(q=0.5, weights=wb)
+            rq1 = self._fit_qr(hyb, Xb, q=0.5, weights=wb)
             b1_boot[b, :] = rq1.params.reshape(-1)
+            # Per-tau coefficients on h(Y)
+            for t in taus:
+                rq_tau = self._fit_qr(hyb, Xb, q=t, weights=wb)
+                beta_tau_boot[float(t)][b, :] = rq_tau.params.reshape(-1)
             if self.use_two_index and self.g_iso_ is not None:
                 r1b = hyb - (Xb @ rq1.params.reshape(-1))
                 r1gb = self.g_iso_.transform(r1b)
                 for t in taus:
-                    rq2 = sm.QuantReg(r1gb, Xb).fit(q=t, weights=wb)
+                    rq2 = self._fit_qr(r1gb, Xb, q=t, weights=wb)
                     b2_boot[t][b, :] = rq2.params.reshape(-1)
 
         alpha = 1.0 - float(ci)
@@ -728,10 +765,25 @@ class FrequentistOQR:
                 se, lo, hi = se_and_ci(mat)
                 b2_out[float(t)] = {"se": se, "ci_low": lo, "ci_high": hi, "ci_level": ci}
             out["beta2_tau"] = b2_out
+        # Per-tau h(Y) on X
+        beta_tau_out: Dict[float, Dict[str, Any]] = {}
+        for t, mat in beta_tau_boot.items():
+            se, lo, hi = se_and_ci(mat)
+            beta_tau_out[float(t)] = {"se": se, "ci_low": lo, "ci_high": hi, "ci_level": ci}
+        out["beta_tau"] = beta_tau_out
         # cache
         self.beta1_boot_ = {"draws": b1_boot, **out["beta1"]}
         if self.use_two_index:
             self.beta2_tau_boot_ = {float(t): {"draws": b2_boot[t], **b2d} for t, b2d in out["beta2_tau"].items()}
+        self.beta_tau_boot_ = {float(t): {"draws": beta_tau_boot[t], **beta_tau_out[float(t)]} for t in beta_tau_boot.keys()}
+        if return_coefs:
+            # Attach draws explicitly in the return dict
+            out["beta1"]["draws"] = b1_boot
+            if self.use_two_index:
+                for t in list(out.get("beta2_tau", {}).keys()):
+                    out["beta2_tau"][t]["draws"] = b2_boot[float(t)]
+            for t in list(out.get("beta_tau", {}).keys()):
+                out["beta_tau"][t]["draws"] = beta_tau_boot[float(t)]
         return out
 
 

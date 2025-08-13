@@ -1,0 +1,3 @@
+analysis_level,country,bottom_gap_avg,top_gap_avg,gap_diff_bottom_minus_top,conclusion,n_observations
+country,india,-0.01530027622045882,-0.03222503755158579,0.01692476133112697,glass ceiling,12677
+country,us,3.6534348879513345e-09,3.599219589034419e-09,5.4215298916915344e-11,sticky floor,19758

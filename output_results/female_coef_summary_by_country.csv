@@ -1,0 +1,3 @@
+country,n,delta_top_bottom_point,delta_top_bottom_ci_low,delta_top_bottom_ci_high,delta_top_bottom_sig,delta_top_bottom_p_boot,classification,reason,bootstrap_success_n,bootstrap_total_n,unstable_CI,qr_warn_count,qr_fit_count,qr_warn_rate,high_warn,estimand_mode
+india,12677,2.17943396663145e-08,-6.93549684349648e-09,4.3201243248025546e-08,False,0.13,no_heterogeneity,规则未触发显著差异,200,200,False,0,3,0.0,False,single_index
+us,19758,4.670599296208167e-09,7.935650893353702e-10,1.5793540457387238e-08,True,0.04,sticky_floor,Δ>0 且显著（底部更不利）,200,200,False,0,3,0.0,False,single_index

@@ -1,31 +1,156 @@
-<p align="center">
-  <img src="assets/logo/logo.png" alt="GLM Plus" width="160" />
-</p>
+<div align="center">
+  <img src="assets/logo/logo.png" alt="GLM Plus Logo" width="200"/>
+  
+  <h1>GLM Plus</h1>
+  <h3>Extended GLMs for Python</h3>
+  
+  <p>
+    <strong>Reliable implementations with clear APIs.</strong><br/>
+  </p>
+  
+  <p>
+    <a href="#installation"><img src="https://img.shields.io/badge/Quick%20Start-Installation-blue" alt="Quick Start"/></a>
+    <a href="#features"><img src="https://img.shields.io/badge/Features-Overview-brightgreen" alt="Features"/></a>
+    <a href="#tutorials"><img src="https://img.shields.io/badge/Tutorials-Docs-orange" alt="Docs"/></a>
+  </p>
+  
+  <p>
+    <a href="#installation">Quick Start</a> •
+    <a href="#usage">Usage</a> •
+    <a href="#examples">Examples</a> •
+    <a href="#tutorials">Documentation</a> •
+    <a href="#contributing">Contributing</a>
+  </p>
+</div>
 
-`GLM Plus` is a Python toolbox for extended GLMs, focused on reliable implementations and clear APIs.
-
-- **Bayesian Ordinal Quantile Regression (OQR)**: `OR1` (J≥4) and `OR2` (J=3), translated and optimized from the R package `bqror`
-- **Panel extensions**: end-to-end pipeline with year fixed effects and gender×year interactions
-- **Frequentist OQR (TORQUE)**: single/two-index approximations with interval prediction
-- Roadmap: rare-events logistic regression (Relogit), Firth penalized logistic regression, zero-inflated counts (ZIP/ZINB)
-
-### Table of contents
-- [Features](#features)
-- [Quick start](#quick-start)
-- [Tutorials](#tutorials)
-- [Dependencies](#dependencies)
-- [Project structure](#project-structure)
-- [References](#references)
+---
 
 ## Features
-- **OR1 / OR2 (Bayesian)**: full posterior sampling, DIC, marginal likelihood, parameter summaries, and covariate effect utilities
-- **Panel-OQR**: build design matrices, fit at multiple quantiles, extract yearly gender gaps, compare top vs bottom, and visualize
-- **Frequentist OQR (TORQUE)**:
-  - Single-index with optional two-index extension
-  - Monotone transform per-quantile and quantile-regression-based estimation
-  - Simple API and interval prediction
 
-## Quick start
+<table>
+<tr>
+<td width="50%">
+
+### <strong>Core Features</strong>
+- Bayesian OQR: `OR1` (J≥4) and `OR2` (J=3), translated and optimized from R `bqror`
+- Panel OQR: year fixed effects and gender×year interactions
+- Frequentist OQR (TORQUE): single/two-index approximations with interval prediction
+- Utilities: posterior summaries, DIC, marginal likelihood, covariate effects
+- Clean, minimal APIs focused on practical workflows
+
+</td>
+<td width="50%">
+
+### <strong>Who is it for?</strong>
+- Applied researchers using ordered outcomes
+- Social science and health analytics
+- Users who need quantile effects beyond means/medians
+- Python users who prefer clear, lightweight interfaces
+
+</td>
+</tr>
+</table>
+
+### Documentation
+
+See the in-repo guides:
+
+- `tutorial_ordinal_quantile_regression.md` — end-to-end OQR tutorial
+- `tutorial_panel_oqr.md` — panel OQR with time trends and comparisons
+- Module docs:
+  - `glm_plus/ordinal_quantile_regression/README.md`
+  - `glm_plus/frequentist/README.md`
+
+---
+
+## Table of Contents
+
+<details>
+<summary>Navigation</summary>
+
+- [About](#about)
+- [Project Structure](#project-structure)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Examples](#examples)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+- [License](#license)
+
+</details>
+
+---
+
+## About
+
+GLM Plus provides ordinal quantile regression in both Bayesian and frequentist flavors, with panel-data helpers and clear Python APIs. It aims to be practical and fast while staying close to the underlying methodology.
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center"><strong>Author</strong></td>
+      <td align="center"><strong>Contact</strong></td>
+      <td align="center"><strong>GitHub</strong></td>
+    </tr>
+    <tr>
+      <td align="center">Yuqi Liang</td>
+      <td align="center"><a href="mailto:dawson1900@live.com">dawson1900@live.com</a></td>
+      <td align="center"><a href="https://github.com/Liang-Team">@Liang-Team</a></td>
+    </tr>
+  </table>
+</div>
+
+## Project Structure
+
+This repository contains Python implementations and supporting materials.
+
+```
+glm_plus/
+├── README.md
+├── assets/
+│   └── logo/
+│       └── logo.png
+├── glm_plus/
+│   ├── ordinal_quantile_regression/
+│   │   ├── ori.py        # OR1 (J≥4)
+│   │   ├── orii.py       # OR2 (J=3)
+│   │   ├── panel_oqr.py  # Panel helpers
+│   │   └── README.md
+│   └── frequentist/
+│       ├── torque.py     # TORQUE implementation
+│       └── README.md
+├── bqror_r_package/      # Reference R package and data
+├── tests/
+│   └── seniority.ipynb   # Example notebook
+├── tutorial_ordinal_quantile_regression.md
+└── tutorial_panel_oqr.md
+```
+
+## Requirements
+
+- Python 3.9+
+- Core: `numpy`, `scipy`, `pandas`
+- Optional: `joblib` (parallel tasks in examples)
+- Frequentist OQR: `scikit-learn`, `statsmodels`, `scipy`
+
+## Installation
+
+This repository does not yet ship as a Python package. Use one of the following:
+
+1) Work from the repo root so `glm_plus` is importable:
+```bash
+git clone https://github.com/your-org/glm_plus.git
+cd glm_plus
+python -c "import glm_plus; print('ok')"
+```
+
+2) Or add the repo root to `PYTHONPATH`:
+```bash
+export PYTHONPATH="$(pwd):$PYTHONPATH"
+```
+
+## Usage
 
 ### OR1 (J≥4) example
 ```python
@@ -70,25 +195,24 @@ model.fit(X, y)
 lo, hi = model.predict_interval(X[:5], 0.25, 0.75)
 ```
 
-## Tutorials
-- Ordinal quantile regression tutorial: `tutorial_ordinal_quantile_regression.md`
-- Panel OQR guide: `tutorial_panel_oqr.md`
-- Module docs:
-  - `glm_plus/ordinal_quantile_regression/README.md`
-  - `glm_plus/frequentist/README.md`
+## Examples
 
-## Dependencies
-- Core: `numpy`, `scipy`, `pandas`
-- Optional parallelism: `joblib`
-- Frequentist OQR: `scikit-learn`, `statsmodels`, `scipy`
+- Run the example notebook: `tests/seniority.ipynb`
+- See tutorials in the repo root for step-by-step guides
 
-## Project structure
-- `glm_plus/ordinal_quantile_regression/`: OR1, OR2, and panel extensions
-- `glm_plus/frequentist/`: TORQUE implementation and examples
-- `bqror_r_package/`: reference R package and data
-- `tests/`: examples and notebooks
-- `assets/logo/`: project logo
+## FAQ
 
-## References
-- Hong, H. G., & Zhou, J. (2013). A multi-index model for quantile regression with ordinal data. Journal of Applied Statistics, 40(6), 1231–1245.
-- Rahman, M. A. (2016). Bayesian Quantile Regression for Ordinal Models. Bayesian Analysis, 11(1), 1–27.
+**Why ordinal quantile regression?** Quantiles reveal distributional effects beyond the mean, which is useful for ordered outcomes.
+
+**Which model should I pick?** Use `OR2` for J=3; use `OR1` for J≥4. The frequentist TORQUE implementation provides a practical alternative.
+
+**Performance?** The Python code includes vectorized latent sampling and optional parallelism. See module READMEs for details.
+
+## Contributing
+
+Contributions are welcome. Please open an issue or pull request with a clear description. Keep APIs simple and add tests or examples when possible.
+
+## License
+
+This repository currently has no explicit license. For uses beyond personal or research purposes, please contact the author.
+

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo/logo.jp2" alt="GLM Plus" width="160" />
+  <img src="assets/logo/logo.png" alt="GLM Plus" width="160" />
 </p>
 
 `GLM Plus` is a Python toolbox for extended GLMs, focused on reliable implementations and clear APIs.

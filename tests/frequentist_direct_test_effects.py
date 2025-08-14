@@ -59,6 +59,10 @@ N_PERMUTATION_DEFAULT = 0
 # —— 概率差阈值（可解释量纲）：至少 2 个百分点 ——
 PROB_DIFF_THRESHOLD = 0.02
 
+# —— 概率尺度改进选项 ——
+PROB_USE_INTERP = True        # 是否用插值计算 CDF（更精确，推荐）
+PROB_AME_S = None             # 样本平均处理效应样本量，None=代表性样本法，>0=AME
+
 # 是否在保存后显示图窗（在终端运行时会阻塞），默认不显示
 SHOW_FIG = False
 
@@ -77,12 +81,14 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 统一拟合函数（保持与你现有 pipeline 一致的配置）
 def fit_model(X: np.ndarray, y: np.ndarray, taus=QUANTILES_MAIN, random_state: int = 0) -> FrequentistOQR:
     # 最小改法：每国只拟合一次；固定单指数；轻量网格以提速
-    subsample_dynamic = SUBSAMPLE_RULE(X.shape[0]) or 2000
+    n = X.shape[0]
+    rule = SUBSAMPLE_RULE(n)
+    subsample_n = None if rule is None else min(int(rule), n)
     m = FrequentistOQR(
         quantiles=taus,
         use_two_index=False,
         auto_select_k=True,
-        subsample_n=int(subsample_dynamic),
+        subsample_n=subsample_n,
         rank_grid_n=25,
         t_grid_n=31,
         random_state=random_state,
@@ -292,6 +298,19 @@ def _ci_from_samples(samples, level=0.95):
 def _p_from_sign_two_sided(samples):
     arr = np.asarray(samples, dtype=float)
     return float(2.0 * min(np.mean(arr >= 0.0), np.mean(arr <= 0.0)))
+
+def _cdf_by_interp(y_of_tau: np.ndarray, taus: np.ndarray, y_thresh: float) -> float:
+    """通过插值计算 P(Y <= y_thresh)，避免阶梯近似"""
+    if y_of_tau.size == 0 or taus.size == 0:
+        return 0.0
+    # 保序 & 去重
+    idx = np.argsort(taus)
+    taus_sorted = taus[idx]
+    y_sorted = y_of_tau[idx]
+    # 单调性强制（可选）
+    y_sorted = np.maximum.accumulate(y_sorted)
+    # 插值：在 y 轴上找阈值对应的 τ
+    return float(np.interp(y_thresh, y_sorted, taus_sorted, left=0.0, right=1.0))
 
 # ==================== Step 3: 按国家提取“female 分位系数 + CI” ====================
 def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP_DEFAULT, random_state: int = 0) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -626,20 +645,28 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
                 out = {'prob_bottom_f0': np.nan, 'prob_bottom_f1': np.nan, 'prob_top_f0': np.nan, 'prob_top_f1': np.nan, 'delta_prob': np.nan}
                 if (y0_arr is None) or (y1_arr is None):
                     return out
-                mask = (tau_grid_all >= float(low_tau) - 1e-12) & (tau_grid_all <= float(high_tau) + 1e-12)
-                if not np.any(mask):
-                    return out
-                y0b = y0_arr[mask]; y1b = y1_arr[mask]; taus = tau_grid_all[mask]
-                m0b = (y0b <= float(j_min) + 1e-9)
-                m1b = (y1b <= float(j_min) + 1e-9)
-                prob_bottom_f0 = float(np.max(taus[m0b])) if np.any(m0b) else 0.0
-                prob_bottom_f1 = float(np.max(taus[m1b])) if np.any(m1b) else 0.0
-                m0tcdf = (y0b <= float(j_max - 1) + 1e-9)
-                m1tcdf = (y1b <= float(j_max - 1) + 1e-9)
-                F0_topm1 = float(np.max(taus[m0tcdf])) if np.any(m0tcdf) else 0.0
-                F1_topm1 = float(np.max(taus[m1tcdf])) if np.any(m1tcdf) else 0.0
-                prob_top_f0 = float(1.0 - F0_topm1)
-                prob_top_f1 = float(1.0 - F1_topm1)
+                # 修正：统一使用全网格，避免带区子区间造成的伪影
+                y0b = y0_arr; y1b = y1_arr; taus = tau_grid_all
+                if PROB_USE_INTERP:
+                    # 插值法：更精确的 CDF
+                    prob_bottom_f0 = _cdf_by_interp(y0b, taus, float(j_min))
+                    prob_bottom_f1 = _cdf_by_interp(y1b, taus, float(j_min))
+                    F0_topm1 = _cdf_by_interp(y0b, taus, float(j_max - 1))
+                    F1_topm1 = _cdf_by_interp(y1b, taus, float(j_max - 1))
+                    prob_top_f0 = float(1.0 - F0_topm1)
+                    prob_top_f1 = float(1.0 - F1_topm1)
+                else:
+                    # 原阶梯法（保留兼容）
+                    m0b = (y0b <= float(j_min) + 1e-9)
+                    m1b = (y1b <= float(j_min) + 1e-9)
+                    prob_bottom_f0 = float(np.max(taus[m0b])) if np.any(m0b) else 0.0
+                    prob_bottom_f1 = float(np.max(taus[m1b])) if np.any(m1b) else 0.0
+                    m0tcdf = (y0b <= float(j_max - 1) + 1e-9)
+                    m1tcdf = (y1b <= float(j_max - 1) + 1e-9)
+                    F0_topm1 = float(np.max(taus[m0tcdf])) if np.any(m0tcdf) else 0.0
+                    F1_topm1 = float(np.max(taus[m1tcdf])) if np.any(m1tcdf) else 0.0
+                    prob_top_f0 = float(1.0 - F0_topm1)
+                    prob_top_f1 = float(1.0 - F1_topm1)
                 delta_prob_b = (prob_bottom_f1 - prob_bottom_f0) - (prob_top_f1 - prob_top_f0)
                 out.update({'prob_bottom_f0': prob_bottom_f0, 'prob_bottom_f1': prob_bottom_f1,
                             'prob_top_f0': prob_top_f0, 'prob_top_f1': prob_top_f1,
@@ -670,6 +697,7 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
                 band_draws[band_name] = draws_band
                 lo_b, hi_b, sig_b = _ci_from_samples(draws_band, level=0.95)
                 p_b = _p_from_sign_two_sided(draws_band)
+                se_b = float(np.nanstd(draws_band, ddof=1)) if draws_band.size > 0 else np.nan
                 # 概率尺度（该 band 的 Δ_prob）
                 if len(band_taus) == 1:
                     low_t, high_t = float(band_taus[0]), float(band_taus[0])
@@ -683,6 +711,7 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
                     'taus': ','.join([str(t) for t in taus_in_band]),
                     'female_coef_point_band': point_band,
                     'female_coef_ci_low_band': lo_b, 'female_coef_ci_high_band': hi_b,
+                    'female_coef_se_band': se_b,
                     'female_coef_sig_band': bool(sig_b), 'female_coef_p_boot_band': float(p_b),
                     'delta_prob_band': float(prob_metrics['delta_prob']),
                     'prob_bottom_female0_band': float(prob_metrics['prob_bottom_f0']),
@@ -690,6 +719,7 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
                     'prob_top_female0_band': float(prob_metrics['prob_top_f0']),
                     'prob_top_female1_band': float(prob_metrics['prob_top_f1']),
                     'hy_sd': hy_sd, 'epsilon': epsilon, 'epsilon_mode': epsilon_mode,
+                    'qr_warn_rate': warn_rate, 'high_warn': high_warn,
                 })
 
             # 三对对比 + Holm 校正
@@ -729,14 +759,15 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
                     'classification_pair': cls_pair,
                     'reason_pair': reason_pair,
                     'epsilon': epsilon, 'epsilon_mode': epsilon_mode,
+                    'qr_warn_rate': warn_rate, 'high_warn': high_warn,
                 }
                 pair_rows_tmp.append(rowp)
             # Holm 校正（每国 3 次对比）
             p_vals = [r['diff_p_boot'] for r in pair_rows_tmp if np.isfinite(r['diff_p_boot'])]
             if len(p_vals) > 0:
-                m = len(pair_rows_tmp)
+                m = sum(np.isfinite(r['diff_p_boot']) for r in pair_rows_tmp)  # 修正：只统计有效 p 值的条数
                 # sort by p ascending
-                order = sorted(range(m), key=lambda i: (pair_rows_tmp[i]['diff_p_boot'] if np.isfinite(pair_rows_tmp[i]['diff_p_boot']) else 1.0))
+                order = sorted(range(len(pair_rows_tmp)), key=lambda i: (pair_rows_tmp[i]['diff_p_boot'] if np.isfinite(pair_rows_tmp[i]['diff_p_boot']) else 1.0))
                 p_sorted = [pair_rows_tmp[i]['diff_p_boot'] if np.isfinite(pair_rows_tmp[i]['diff_p_boot']) else 1.0 for i in order]
                 p_adj_sorted = []
                 for j, pj in enumerate(p_sorted, start=1):
@@ -750,12 +781,13 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
             # 基于 Holm 的更保守显著性标记
             for r in pair_rows_tmp:
                 r['diff_sig_holm'] = (np.isfinite(r.get('diff_p_boot_holm', np.nan)) and float(r['diff_p_boot_holm']) < 0.05)
-                # 按“未校正CI显著 AND Holm显著”共同为真进入强结论
-                if r['diff_sig'] and r['diff_sig_holm']:
-                    pass  # 分类在上方已依据未校正CI；保留 reason_pair，不强改
-                else:
+                # 修正悬空变量问题：用行内的 band_A/band_B 构造标签
+                label_sticky = f"{r['band_A']}_more_sticky_vs_{r['band_B']}"
+                label_glass = f"{r['band_A']}_more_glass_vs_{r['band_B']}"
+                # 按"未校正CI显著 AND Holm显著"共同为真进入强结论
+                if not (r['diff_sig'] and r['diff_sig_holm']):
                     # 若任一不显著，则若原分类为强结论则降级为 no_heterogeneity
-                    if r['classification_pair'] in (f'{a}_more_sticky_vs_{b}', f'{a}_more_glass_vs_{b}'):
+                    if r['classification_pair'] in (label_sticky, label_glass):
                         r['classification_pair'] = 'no_heterogeneity'
                         r['reason_pair'] = 'Holm 未通过或 CI 未显著'
             for r in pair_rows_tmp:
@@ -854,6 +886,36 @@ if len(female_coef_all) > 0:
         except Exception:
             pass
     print("[note] 附注：qr_warn_rate > 0.2 视为不稳定（high_warn=True）。")
+    
+    # 导出元数据配置
+    try:
+        import json
+        metadata = {
+            "timestamp": pd.Timestamp.now().isoformat(),
+            "random_state": 0,
+            "quantiles_main": list(QUANTILES_MAIN),
+            "bands_def": BANDS_DEF,
+            "compare_pairs": COMPARE_PAIRS,
+            "n_bootstrap_default": N_BOOTSTRAP_DEFAULT,
+            "effect_size_mode": EFFECT_SIZE_MODE,
+            "epsilon_sd_frac": EPSILON_SD_FRAC,
+            "epsilon_iqr_frac": EPSILON_IQR_FRAC,
+            "prob_diff_threshold": PROB_DIFF_THRESHOLD,
+            "prob_use_interp": PROB_USE_INTERP,
+            "prob_ame_s": PROB_AME_S,
+            "n_permutation_default": N_PERMUTATION_DEFAULT,
+            "estimand_mode": ESTIMAND_MODE,
+            "rank_grid_n": 25,
+            "t_grid_n": 31,
+            "qr_p_tol": QR_P_TOL,
+            "subsample_rule": "lambda n: (5000 if n > 20000 else (3000 if n > 3000 else None))",
+        }
+        meta_path = f'{OUTPUT_DIR}/analysis_metadata.json'
+        with open(meta_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        print(f"✓ 分析元数据已保存: {meta_path}")
+    except Exception:
+        pass
 
     # 画每国一条曲线，并用阴影标出 95% CI
     plt.figure(figsize=(7, 5))

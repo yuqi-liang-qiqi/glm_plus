@@ -1,0 +1,7 @@
+country,n,band_A,band_B,diff_point,diff_ci_low,diff_ci_high,diff_sig,diff_p_boot,delta_prob_diff,classification_pair,reason_pair,epsilon,epsilon_mode,diff_p_boot_holm,diff_sig_holm
+india,12677,mid,low,-0.4568550359560202,-0.7938281335486526,-0.08567126360727649,True,0.03,0.5,no_heterogeneity,规则未触发显著差异,0.030660061374400218,sd_pct,0.09,False
+india,12677,mid,high,-0.4568550690552196,-0.7938281502042063,-0.08567129655424144,True,0.03,0.5,no_heterogeneity,规则未触发显著差异,0.030660061374400218,sd_pct,0.09,False
+india,12677,low,high,-3.309919940908124e-08,-4.212456431590405e-08,5.519289587863224e-10,False,0.06,0.0,no_heterogeneity,规则未触发显著差异,0.030660061374400218,sd_pct,0.09,False
+us,19758,mid,low,2.224935565925401e-07,-0.15877042186941917,0.010342370705870418,False,0.89,0.0,no_heterogeneity,规则未触发显著差异,0.028291402578217884,sd_pct,1.0,False
+us,19758,mid,high,2.144822401628499e-07,-0.15877043344529723,0.010342361682999804,False,0.9,0.0,no_heterogeneity,规则未触发显著差异,0.028291402578217884,sd_pct,1.0,False
+us,19758,low,high,-8.011316429690218e-09,-1.701622961390592e-08,-6.136373825738043e-10,True,0.03,0.0,diff_sig_but_small_effect,|差值| 低于 ε,0.028291402578217884,sd_pct,0.09,False

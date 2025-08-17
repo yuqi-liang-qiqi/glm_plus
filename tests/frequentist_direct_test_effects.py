@@ -312,13 +312,65 @@ def _cdf_by_interp(y_of_tau: np.ndarray, taus: np.ndarray, y_thresh: float) -> f
     # 插值：在 y 轴上找阈值对应的 τ
     return float(np.interp(y_thresh, y_sorted, taus_sorted, left=0.0, right=1.0))
 
+# === Helper: 生成 y(τ) 曲线（切换 female=0/1），与 CDF 包装器 ===
+def _make_y_curves_on_tau_grid(m: FrequentistOQR, rq_model, Xdf: pd.DataFrame, Xg: np.ndarray, female_idx: int, hy: np.ndarray, tau_grid: np.ndarray, use_ame_s=None, params_cache: dict | None = None):
+    """
+    生成在给定 tau_grid 上，代表性个体（或 AME 样本平均）下 female=0/1 的 y 曲线。
+    返回: (taus, y0_arr, y1_arr)
+    依赖: m._hinv；rq_model 为 QuantReg(hy, Xg)
+    """
+    # 代表性 x
+    if use_ame_s is None or use_ame_s <= 0:
+        x_samples = [np.asarray(Xdf.mean(), dtype=float).reshape(-1)]
+    else:
+        rng = np.random.default_rng(0)
+        idx = rng.choice(np.arange(len(Xdf)), size=int(use_ame_s), replace=False)
+        x_samples = [np.asarray(Xdf.iloc[i], dtype=float).reshape(-1) for i in idx]
+
+    def _params_for_tau(tau_val: float) -> np.ndarray:
+        key = float(tau_val)
+        if params_cache is not None and key in params_cache:
+            return np.asarray(params_cache[key], dtype=float).reshape(-1)
+        try:
+            rq = rq_model.fit(q=float(key), max_iter=5000, p_tol=QR_P_TOL)
+        except TypeError:
+            rq = rq_model.fit(q=float(key), max_iter=5000)
+        b = np.asarray(rq.params, dtype=float).reshape(-1)
+        if params_cache is not None:
+            params_cache[key] = b.copy()
+        return b
+
+    def _y_curve_for(x_base: np.ndarray, fem_val: int) -> np.ndarray:
+        x = x_base.copy(); x[female_idx] = float(fem_val)
+        vals = []
+        for t in tau_grid:
+            b = _params_for_tau(float(t))
+            hy_pred = float(x @ b)
+            y_pred = float(m._hinv(np.array([hy_pred]))[0])
+            vals.append(y_pred)
+        return np.asarray(vals, dtype=float)
+
+    y0_list_all, y1_list_all = [], []
+    for xi in x_samples:
+        y0_list_all.append(_y_curve_for(xi, fem_val=0))
+        y1_list_all.append(_y_curve_for(xi, fem_val=1))
+    y0_arr = np.mean(np.vstack(y0_list_all), axis=0)
+    y1_arr = np.mean(np.vstack(y1_list_all), axis=0)
+    return np.asarray(tau_grid, dtype=float), y0_arr, y1_arr
+
+def _cdf_from_ycurve(y_of_tau: np.ndarray, taus: np.ndarray, y_thresh: float) -> float:
+    """包装现有插值 CDF 以便按 y 曲线反推 F(y_thresh)。"""
+    return _cdf_by_interp(np.asarray(y_of_tau, dtype=float), np.asarray(taus, dtype=float), float(y_thresh))
+
 # ==================== Step 3: 按国家提取“female 分位系数 + CI” ====================
-def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP_DEFAULT, random_state: int = 0) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP_DEFAULT, random_state: int = 0) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     female_coef_rows = []            # 点估（逐 τ）
     female_coef_boot_rows = []       # Bootstrap CI（逐 τ）
     band_rows = []                   # 带区聚合（low/low_mid/mid/mid_high/high）
     band_compare_rows = []           # 带区对比（mid-vs-low、mid-vs-high、low-vs-high）
     delta_rows = []                  # 国家级 Δ 兜底汇总（底 vs 顶，用于与旧口径对比）
+    rank_equiv_rows = []             # Rank-equivalent Δτ（按 band）
+    thresh_rows = []                 # Threshold-crossing ΔP（按门槛）
 
     print("=== 按国家抽取 being female 的分位系数（含95% bootstrap CI）===")
     print("[note] 本分析矩阵不含常数列（拦截项），female 系数为相对无截距线性项的边际效应。")
@@ -407,6 +459,28 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
             epsilon = np.nan
             epsilon_mode = 'undefined'
 
+        # —— 预先构造概率尺度所需的 y(τ) 曲线（统一使用封装函数 + 参数缓存） ——
+        try:
+            rq_model_global = sm.QuantReg(hy, Xg)
+        except Exception:
+            rq_model_global = None
+        tau_grid_all = np.linspace(0.02, 0.98, 41)
+        y0_arr = None; y1_arr = None
+        params_cache: dict = {}
+        if rq_model_global is not None:
+            try:
+                _, y0_arr, y1_arr = _make_y_curves_on_tau_grid(
+                    m, rq_model_global, Xdf, Xg, female_idx, hy,
+                    tau_grid=np.asarray(tau_grid_all, dtype=float),
+                    use_ame_s=PROB_AME_S,
+                    params_cache=params_cache
+                )
+                # 点估曲线也做单调修正，增强插值稳健性
+                y0_arr = np.maximum.accumulate(np.asarray(y0_arr, dtype=float))
+                y1_arr = np.maximum.accumulate(np.asarray(y1_arr, dtype=float))
+            except Exception:
+                y0_arr = None; y1_arr = None
+
         # 3) CI 与显著性
         bottom_sig_neg = False
         top_sig_neg = False
@@ -456,7 +530,7 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
                 pass
             delta_abs = float(abs(d_point)) if np.isfinite(d_point) else np.nan
             delta_std_sd = float(d_point / hy_sd) if (np.isfinite(d_point) and np.isfinite(hy_sd) and hy_sd > 0) else np.nan
-            # 概率尺度 Δ_prob（基于代表性样本、τ 网格近似）：
+            # 概率尺度 Δ_prob（统一通过封装的 y(τ) 曲线 + 插值 CDF）：
             # Δ_prob = [P_bottom(f=1)-P_bottom(f=0)] - [P_top(f=1)-P_top(f=0)]
             delta_prob = np.nan
             prob_bottom_f0 = np.nan
@@ -464,46 +538,19 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
             prob_top_f0 = np.nan
             prob_top_f1 = np.nan
             try:
-                # 代表性样本：使用各特征的样本均值；仅切换 female=0/1
-                x_rep = np.asarray(Xdf.mean(), dtype=float).reshape(-1)
-                x0 = x_rep.copy(); x1 = x_rep.copy()
-                x0[female_idx] = 0.0
-                x1[female_idx] = 1.0
-                # τ 网格
-                tau_grid = np.linspace(0.02, 0.98, 41)
-                y0_list = []
-                y1_list = []
-                rq_model = sm.QuantReg(hy, Xg)
-                for t in tau_grid:
-                    try:
-                        rq = rq_model.fit(q=float(t), max_iter=5000, p_tol=QR_P_TOL)
-                    except TypeError:
-                        rq = rq_model.fit(q=float(t), max_iter=5000)
-                    b = np.asarray(rq.params, dtype=float).reshape(-1)
-                    hy0 = float(x0 @ b); hy1 = float(x1 @ b)
-                    y0 = float(m._hinv(np.array([hy0]))[0])
-                    y1 = float(m._hinv(np.array([hy1]))[0])
-                    y0_list.append(y0)
-                    y1_list.append(y1)
-                y0_arr = np.asarray(y0_list, dtype=float)
-                y1_arr = np.asarray(y1_list, dtype=float)
                 # 类别边界
                 j_min = int(m._y_min_cat) if m._y_min_cat is not None else int(np.nanmin(yg))
                 j_max = int(m._y_max_cat) if m._y_max_cat is not None else int(np.nanmax(yg))
-                # 底部概率: P(Y<=j_min)
-                mask0_bottom = (y0_arr <= float(j_min) + 1e-9)
-                mask1_bottom = (y1_arr <= float(j_min) + 1e-9)
-                prob_bottom_f0 = float(np.max(tau_grid[mask0_bottom])) if np.any(mask0_bottom) else 0.0
-                prob_bottom_f1 = float(np.max(tau_grid[mask1_bottom])) if np.any(mask1_bottom) else 0.0
-                # 顶部概率: P(Y=j_max) = 1 - P(Y<=j_max-1)
-                thresh_top = float(j_max - 1)
-                mask0_topcdf = (y0_arr <= thresh_top + 1e-9)
-                mask1_topcdf = (y1_arr <= thresh_top + 1e-9)
-                F_topminus1_f0 = float(np.max(tau_grid[mask0_topcdf])) if np.any(mask0_topcdf) else 0.0
-                F_topminus1_f1 = float(np.max(tau_grid[mask1_topcdf])) if np.any(mask1_topcdf) else 0.0
-                prob_top_f0 = float(1.0 - F_topminus1_f0)
-                prob_top_f1 = float(1.0 - F_topminus1_f1)
-                delta_prob = (prob_bottom_f1 - prob_bottom_f0) - (prob_top_f1 - prob_top_f0)
+                if (y0_arr is not None) and (y1_arr is not None):
+                    taus = np.asarray(tau_grid_all, dtype=float)
+                    # 使用插值 CDF（更平滑稳健）
+                    prob_bottom_f0 = _cdf_by_interp(y0_arr, taus, float(j_min))
+                    prob_bottom_f1 = _cdf_by_interp(y1_arr, taus, float(j_min))
+                    F0_topm1 = _cdf_by_interp(y0_arr, taus, float(j_max - 1))
+                    F1_topm1 = _cdf_by_interp(y1_arr, taus, float(j_max - 1))
+                    prob_top_f0 = float(1.0 - F0_topm1)
+                    prob_top_f1 = float(1.0 - F1_topm1)
+                    delta_prob = (prob_bottom_f1 - prob_bottom_f0) - (prob_top_f1 - prob_top_f0)
             except Exception:
                 delta_prob = np.nan
 
@@ -611,33 +658,7 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
             # 预先计算 band 内的概率尺度 Δ_prob（使用 tau_grid 中落在 band 的点）
             band_to_delta_prob: Dict[str, float] = {}
             band_to_probs: Dict[str, Dict[str, float]] = {}
-            # 预先计算基于 hy 的 rq_model（避免重复构建）
-            try:
-                rq_model_global = sm.QuantReg(hy, Xg)
-            except Exception:
-                rq_model_global = None
-            # 先计算一次 y0_arr, y1_arr（用 41 点），后续按 band 过滤
-            tau_grid_all = np.linspace(0.02, 0.98, 41)
-            y0_arr = None; y1_arr = None
-            try:
-                x_rep = np.asarray(Xdf.mean(), dtype=float).reshape(-1)
-                x0 = x_rep.copy(); x1 = x_rep.copy()
-                x0[female_idx] = 0.0; x1[female_idx] = 1.0
-                y0_list = []; y1_list = []
-                if rq_model_global is not None:
-                    for t in tau_grid_all:
-                        try:
-                            rq = rq_model_global.fit(q=float(t), max_iter=5000, p_tol=QR_P_TOL)
-                        except TypeError:
-                            rq = rq_model_global.fit(q=float(t), max_iter=5000)
-                        b = np.asarray(rq.params, dtype=float).reshape(-1)
-                        hy0 = float(x0 @ b); hy1 = float(x1 @ b)
-                        y0_list.append(float(m._hinv(np.array([hy0]))[0]))
-                        y1_list.append(float(m._hinv(np.array([hy1]))[0]))
-                    y0_arr = np.asarray(y0_list, dtype=float)
-                    y1_arr = np.asarray(y1_list, dtype=float)
-            except Exception:
-                y0_arr = None; y1_arr = None
+            # 此处直接复用前面统一生成的 y0_arr / y1_arr（若不可用则跳过相关概率指标）
             j_min = int(m._y_min_cat) if m._y_min_cat is not None else int(np.nanmin(yg))
             j_max = int(m._y_max_cat) if m._y_max_cat is not None else int(np.nanmax(yg))
 
@@ -765,13 +786,13 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
             # Holm 校正（每国 3 次对比）
             p_vals = [r['diff_p_boot'] for r in pair_rows_tmp if np.isfinite(r['diff_p_boot'])]
             if len(p_vals) > 0:
-                m = sum(np.isfinite(r['diff_p_boot']) for r in pair_rows_tmp)  # 修正：只统计有效 p 值的条数
+                n_tests = sum(np.isfinite(r['diff_p_boot']) for r in pair_rows_tmp)  # 修正：只统计有效 p 值的条数
                 # sort by p ascending
                 order = sorted(range(len(pair_rows_tmp)), key=lambda i: (pair_rows_tmp[i]['diff_p_boot'] if np.isfinite(pair_rows_tmp[i]['diff_p_boot']) else 1.0))
                 p_sorted = [pair_rows_tmp[i]['diff_p_boot'] if np.isfinite(pair_rows_tmp[i]['diff_p_boot']) else 1.0 for i in order]
                 p_adj_sorted = []
                 for j, pj in enumerate(p_sorted, start=1):
-                    p_adj_sorted.append(min((m - j + 1) * pj, 1.0))
+                    p_adj_sorted.append(min((n_tests - j + 1) * pj, 1.0))
                 # enforce monotonicity
                 for j in range(1, len(p_adj_sorted)):
                     p_adj_sorted[j] = max(p_adj_sorted[j], p_adj_sorted[j - 1])
@@ -792,6 +813,151 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
                         r['reason_pair'] = 'Holm 未通过或 CI 未显著'
             for r in pair_rows_tmp:
                 band_compare_rows.append(r)
+
+            # —— 新增：Rank-equivalent Δτ（按 band） ——
+            try:
+                taus_all = np.asarray(tau_grid_all, dtype=float)
+                y0_arr_use = np.asarray(y0_arr, dtype=float)
+                y1_arr_use = np.asarray(y1_arr, dtype=float)
+
+                def _tau_of_y_on_female_curve(y_target: float) -> float:
+                    return _cdf_from_ycurve(y1_arr_use, taus_all, float(y_target))
+
+                for band_name, band_taus in BANDS_DEF.items():
+                    tau_list = [float(t) for t in band_taus]
+                    deltas = []
+                    for t in tau_list:
+                        y0_t = float(np.interp(float(t), taus_all, y0_arr_use))
+                        t_star = float(_tau_of_y_on_female_curve(y0_t))
+                        deltas.append(t_star - float(t))
+                    delta_tau_point = float(np.mean(deltas)) if len(deltas) > 0 else np.nan
+
+                    # Bootstrap：基于 boot['beta_tau'][tau]['draws'] 重构曲线
+                    draw_deltas = []
+                    if isinstance(boot, dict) and ('beta_tau' in boot) and len(boot['beta_tau']) > 0:
+                        tau_keys = sorted([float(tk) for tk in boot['beta_tau'].keys()])
+                        n_boot_eff = None
+                        X0 = np.asarray(Xdf.mean(), dtype=float).reshape(-1); X0[female_idx] = 0.0
+                        X1 = X0.copy(); X1[female_idx] = 1.0
+                        mats0, mats1 = [], []
+                        for tkey in tau_keys:
+                            draws_t = np.asarray(boot['beta_tau'][tkey]['draws'])
+                            if draws_t.size == 0:
+                                continue
+                            if n_boot_eff is None:
+                                n_boot_eff = draws_t.shape[0]
+                            hy0 = draws_t @ X0.reshape(-1)
+                            hy1 = draws_t @ X1.reshape(-1)
+                            y0b = m._hinv(hy0.reshape(-1))
+                            y1b = m._hinv(hy1.reshape(-1))
+                            mats0.append(y0b.reshape(1, -1))
+                            mats1.append(y1b.reshape(1, -1))
+                        if n_boot_eff is not None and len(mats0) > 0 and len(mats1) > 0:
+                            Y0 = np.vstack(mats0)  # (#taus, n_boot)
+                            Y1 = np.vstack(mats1)
+                            T = np.array(tau_keys, dtype=float).reshape(-1)
+                            for j in range(Y0.shape[1]):
+                                y0_curve = np.maximum.accumulate(Y0[:, j])
+                                y1_curve = np.maximum.accumulate(Y1[:, j])
+                                vals = []
+                                for t in tau_list:
+                                    y0_t = float(np.interp(float(t), T, y0_curve))
+                                    t_star = float(np.interp(y0_t, y1_curve, T, left=0.0, right=1.0))
+                                    vals.append(t_star - float(t))
+                                draw_deltas.append(float(np.mean(vals)))
+                    lo_re, hi_re, sig_re = _ci_from_samples(draw_deltas, level=0.95)
+                    p_re = _p_from_sign_two_sided(draw_deltas) if len(draw_deltas) > 0 else np.nan
+                    rank_equiv_rows.append({
+                        'country': str(ctry), 'n': n, 'band': band_name,
+                        'taus': ','.join(map(str, tau_list)),
+                        'band_size': int(len(tau_list)),
+                        'effect_threshold_epsilon': float(epsilon) if np.isfinite(epsilon) else np.nan,
+                        'delta_tau_point': delta_tau_point,
+                        'delta_tau_ci_low': lo_re, 'delta_tau_ci_high': hi_re,
+                        'delta_tau_sig': bool(sig_re), 'delta_tau_p_boot': float(p_re) if np.isfinite(p_re) else np.nan
+                    })
+            except Exception:
+                pass
+
+            # —— 新增：Threshold-crossing ΔP（按门槛） ——
+            try:
+                j_min_local = int(m._y_min_cat) if m._y_min_cat is not None else int(np.nanmin(yg))
+                j_max_local = int(m._y_max_cat) if m._y_max_cat is not None else int(np.nanmax(yg))
+                cutpoints = list(range(j_min_local + 1, j_max_local + 1))  # 例如 2,3,4
+
+                def _DeltaP_at_cut(y0_curve: np.ndarray, y1_curve: np.ndarray, taus: np.ndarray, c_next: int) -> float:
+                    Fm = _cdf_from_ycurve(y0_curve, taus, float(c_next - 1e-9))
+                    Ff = _cdf_from_ycurve(y1_curve, taus, float(c_next - 1e-9))
+                    return float((1.0 - Ff) - (1.0 - Fm))
+
+                # 点估
+                for c_next in cutpoints:
+                    dP_point = _DeltaP_at_cut(y0_arr_use, y1_arr_use, taus_all, int(c_next))
+                    thresh_rows.append({
+                        'country': str(ctry), 'n': n, 'cutpoint_next': int(c_next),
+                        'deltaP_point': dP_point,
+                        'prob_diff_threshold': float(PROB_DIFF_THRESHOLD)
+                    })
+
+                # Bootstrap
+                if isinstance(boot, dict) and ('beta_tau' in boot) and len(boot['beta_tau']) > 0:
+                    tau_keys = sorted([float(tk) for tk in boot['beta_tau'].keys()])
+                    n_boot_eff = None
+                    X0 = np.asarray(Xdf.mean(), dtype=float).reshape(-1); X0[female_idx] = 0.0
+                    X1 = X0.copy(); X1[female_idx] = 1.0
+                    mats0, mats1 = [], []
+                    for tkey in tau_keys:
+                        draws_t = np.asarray(boot['beta_tau'][tkey]['draws'])
+                        if draws_t.size == 0:
+                            continue
+                        if n_boot_eff is None:
+                            n_boot_eff = draws_t.shape[0]
+                        hy0 = draws_t @ X0.reshape(-1)
+                        hy1 = draws_t @ X1.reshape(-1)
+                        y0b = m._hinv(hy0.reshape(-1))
+                        y1b = m._hinv(hy1.reshape(-1))
+                        mats0.append(y0b.reshape(1, -1))
+                        mats1.append(y1b.reshape(1, -1))
+                    if n_boot_eff is not None and len(mats0) > 0 and len(mats1) > 0:
+                        Y0 = np.vstack(mats0)
+                        Y1 = np.vstack(mats1)
+                        T = np.array(tau_keys, dtype=float).reshape(-1)
+                        # 逐 cutpoint 生成抽样 ΔP、CI 与 p 值
+                        dp_summary_per_cut = []
+                        for c_next in cutpoints:
+                            draws_dp = []
+                            for j in range(Y0.shape[1]):
+                                y0_curve = np.maximum.accumulate(Y0[:, j])
+                                y1_curve = np.maximum.accumulate(Y1[:, j])
+                                dp = _DeltaP_at_cut(y0_curve, y1_curve, T, int(c_next))
+                                draws_dp.append(float(dp))
+                            lo_dp, hi_dp, sig_dp = _ci_from_samples(draws_dp, level=0.95)
+                            p_dp = _p_from_sign_two_sided(draws_dp)
+                            dp_summary_per_cut.append({'cut': int(c_next), 'p': float(p_dp)})
+                            thresh_rows.append({
+                                'country': str(ctry), 'n': n, 'cutpoint_next': int(c_next),
+                                'deltaP_ci_low': lo_dp, 'deltaP_ci_high': hi_dp,
+                                'deltaP_sig': bool(sig_dp), 'deltaP_p_boot': float(p_dp),
+                                'prob_diff_threshold': float(PROB_DIFF_THRESHOLD)
+                            })
+                        # 可选：对同一国家的三条 ΔP 做 Holm 校正（headline 友好）
+                        if len(dp_summary_per_cut) >= 2:
+                            mtests = len(dp_summary_per_cut)
+                            order = sorted(range(mtests), key=lambda i: dp_summary_per_cut[i]['p'])
+                            p_sorted = [dp_summary_per_cut[i]['p'] for i in order]
+                            p_adj_sorted = []
+                            for j, pj in enumerate(p_sorted, start=1):
+                                p_adj_sorted.append(min((mtests - j + 1) * pj, 1.0))
+                            for idx_pos, i in enumerate(order):
+                                cut = dp_summary_per_cut[i]['cut']
+                                # 回填到 thresh_rows 对应 cut 的最后一行（CI 行）
+                                for rr in reversed(thresh_rows):
+                                    if rr.get('country') == str(ctry) and rr.get('n') == n and rr.get('cutpoint_next') == cut and 'deltaP_ci_low' in rr:
+                                        rr['deltaP_p_boot_holm'] = float(p_adj_sorted[idx_pos])
+                                        rr['deltaP_sig_holm'] = bool(float(p_adj_sorted[idx_pos]) < 0.05)
+                                        break
+            except Exception:
+                pass
         else:
             warn_rate = (float(warn_counter.get('warn_count', 0)) / float(warn_counter.get('fit_count', 1)))
             delta_row = {
@@ -836,10 +1002,12 @@ def analyze_by_country_detailed(min_n: int = 500, n_bootstrap: int = N_BOOTSTRAP
             )
         drop_cols = [c for c in ['female_coef_point_x', 'female_coef_point_y'] if c in female_coef_all.columns]
         female_coef_all = female_coef_all.drop(columns=drop_cols)
-    return female_coef_all, pd.DataFrame(delta_rows), pd.DataFrame(band_rows), pd.DataFrame(band_compare_rows)
+    rank_equiv_df = pd.DataFrame(rank_equiv_rows)
+    thresh_df = pd.DataFrame(thresh_rows)
+    return female_coef_all, pd.DataFrame(delta_rows), pd.DataFrame(band_rows), pd.DataFrame(band_compare_rows), rank_equiv_df, thresh_df
 
 _log(f"[2/3] 开始分国家系数分析 (min_n=500, bootstrap={N_BOOTSTRAP_DEFAULT})…")
-female_coef_all, delta_df, band_df, band_cmp_df = analyze_by_country_detailed(min_n=500, n_bootstrap=N_BOOTSTRAP_DEFAULT)
+female_coef_all, delta_df, band_df, band_cmp_df, rank_equiv_df, thresh_df = analyze_by_country_detailed(min_n=500, n_bootstrap=N_BOOTSTRAP_DEFAULT)
 
 print(f"\n完成！涵盖 {female_coef_all['country'].nunique() if len(female_coef_all) > 0 else 0} 个国家")
 print("\n=== being female 的分位系数（前10行）===")
@@ -886,6 +1054,16 @@ if len(female_coef_all) > 0:
         except Exception:
             pass
     print("[note] 附注：qr_warn_rate > 0.2 视为不稳定（high_warn=True）。")
+
+    # 新增导出：Rank-equivalent Δτ 与 Threshold-crossing ΔP
+    if len(rank_equiv_df) > 0:
+        out_csv_re = f'{OUTPUT_DIR}/rank_equivalent_shifts.csv'
+        rank_equiv_df.to_csv(out_csv_re, index=False)
+        print(f"✓ Rank-equivalent（Δτ）已保存: {out_csv_re}")
+    if len(thresh_df) > 0:
+        out_csv_dp = f'{OUTPUT_DIR}/threshold_crossing_deltaP.csv'
+        thresh_df.to_csv(out_csv_dp, index=False)
+        print(f"✓ 过门槛概率差（ΔP）已保存: {out_csv_dp}")
     
     # 导出元数据配置
     try:

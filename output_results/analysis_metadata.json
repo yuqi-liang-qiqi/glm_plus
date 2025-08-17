@@ -1,0 +1,63 @@
+{
+  "timestamp": "2025-08-14T10:33:57.889015",
+  "random_state": 0,
+  "quantiles_main": [
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9
+  ],
+  "bands_def": {
+    "low": [
+      0.1,
+      0.2
+    ],
+    "low_mid": [
+      0.3,
+      0.4
+    ],
+    "mid": [
+      0.5
+    ],
+    "mid_high": [
+      0.6,
+      0.7
+    ],
+    "high": [
+      0.8,
+      0.9
+    ]
+  },
+  "compare_pairs": [
+    [
+      "mid",
+      "low"
+    ],
+    [
+      "mid",
+      "high"
+    ],
+    [
+      "low",
+      "high"
+    ]
+  ],
+  "n_bootstrap_default": 200,
+  "effect_size_mode": "sd_pct",
+  "epsilon_sd_frac": 0.02,
+  "epsilon_iqr_frac": 0.01,
+  "prob_diff_threshold": 0.02,
+  "prob_use_interp": true,
+  "prob_ame_s": null,
+  "n_permutation_default": 0,
+  "estimand_mode": "single_index",
+  "rank_grid_n": 25,
+  "t_grid_n": 31,
+  "qr_p_tol": 1e-06,
+  "subsample_rule": "lambda n: (5000 if n > 20000 else (3000 if n > 3000 else None))"
+}

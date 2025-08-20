@@ -208,6 +208,15 @@ class Gologit2Result:
     - fun: final negative log-likelihood value.
     - message: optimizer message.
     - hess_inv: inverse Hessian approximation returned by optimizer (if any).
+    - se_alphas: standard errors for cutpoint parameters (or None).
+    - se_beta_pl: standard errors for parallel-lines coefficients (or None).
+    - se_beta_npl: standard errors for non-parallel coefficients (or None).
+    - pvalues_alphas: p-values for cutpoint parameters (or None).
+    - pvalues_beta_pl: p-values for parallel-lines coefficients (or None).
+    - pvalues_beta_npl: p-values for non-parallel coefficients (or None).
+    - pseudo_r2: McFadden's pseudo R-squared (or None).
+    - pseudo_r2_adj: adjusted pseudo R-squared (or None).
+    - null_loglik: log-likelihood of null model (intercept only).
     """
 
     link: str
@@ -222,6 +231,20 @@ class Gologit2Result:
     fun: float
     message: str
     hess_inv: Optional[np.ndarray]
+    se_alphas: Optional[np.ndarray] = None
+    se_beta_pl: Optional[np.ndarray] = None
+    se_beta_npl: Optional[np.ndarray] = None
+    pvalues_alphas: Optional[np.ndarray] = None
+    pvalues_beta_pl: Optional[np.ndarray] = None
+    pvalues_beta_npl: Optional[np.ndarray] = None
+    pseudo_r2: Optional[float] = None
+    pseudo_r2_adj: Optional[float] = None
+    null_loglik: Optional[float] = None
+    # 诊断信息
+    hessian_condition_number: Optional[float] = None
+    cov_condition_number: Optional[float] = None
+    hessian_method: Optional[str] = None
+    inversion_method: Optional[str] = None
 
     def params_as_dict(self) -> dict:
         """Return parameters in a friendly dict format for inspection."""
@@ -246,6 +269,12 @@ class Gologit2Result:
         lines.append(f"Convergence: {'Yes' if self.success else 'No'}")
         lines.append(f"Iterations: {self.n_iter}")
         lines.append(f"Negative Log-Likelihood: {self.fun:.6f}")
+        if self.null_loglik is not None:
+            lines.append(f"Null Log-Likelihood: {self.null_loglik:.6f}")
+        if self.pseudo_r2 is not None:
+            lines.append(f"McFadden's Pseudo R²: {self.pseudo_r2:.4f}")
+        if self.pseudo_r2_adj is not None:
+            lines.append(f"Adjusted Pseudo R²: {self.pseudo_r2_adj:.4f}")
         lines.append("")
         
         # Variable constraint information
@@ -263,30 +292,84 @@ class Gologit2Result:
         lines.append("- Only the intercept/cutpoint signs differ between implementations")
         lines.append("")
         
+        # Note about standard errors and diagnostics
+        if self.se_alphas is not None:
+            lines.append("STANDARD ERRORS:")
+            lines.append("- Cutpoint SEs computed using Delta method transformation from monotonic")
+            lines.append("  reparameterization (accounts for constraint α₁ < α₂ < ... < αₖ)")
+            lines.append("- Coefficient SEs computed from numerical Hessian at MLE")
+            lines.append("- P-values based on asymptotic normal distribution (Wald tests)")
+            
+            # 添加数值诊断信息
+            if self.hessian_method:
+                lines.append(f"- Hessian computed using {self.hessian_method} finite differences")
+            if self.inversion_method:
+                lines.append(f"- Matrix inverted using {self.inversion_method}")
+            if self.hessian_condition_number is not None:
+                lines.append(f"- Hessian condition number: {self.hessian_condition_number:.2e}")
+            if self.cov_condition_number is not None:
+                lines.append(f"- Covariance matrix condition number: {self.cov_condition_number:.2e}")
+                if self.cov_condition_number > 1e12:
+                    lines.append("  ⚠ Very high condition number - SEs may be unreliable")
+            lines.append("")
+            
+            lines.append("PREDICTION vs TRAINING CONSISTENCY:")
+            lines.append("- Training: negative probabilities trigger infeasibility (hard constraint)")
+            lines.append("- Prediction: probabilities clipped to [0,1] and renormalized (safe mode)")
+            lines.append("- Interpret predictions near constraint boundaries with caution")
+            lines.append("")
+        
         # Cutpoints
         lines.append("Cutpoints (Intercepts):")
-        lines.append("-" * 30)
-        for i, alpha in enumerate(self.alphas, 1):
-            lines.append(f"  α{i:2d} = {alpha:10.6f}")
+        lines.append("-" * 65)
+        if self.se_alphas is not None and self.pvalues_alphas is not None:
+            lines.append("                Coef.      Std.Err         z        P>|z|")
+            lines.append("-" * 65)
+            for i, (alpha, se, pval) in enumerate(zip(self.alphas, self.se_alphas, self.pvalues_alphas), 1):
+                z_stat = alpha / se if se > 0 else 0
+                significance = "***" if pval < 0.001 else "**" if pval < 0.01 else "*" if pval < 0.05 else ""
+                lines.append(f"  α{i:2d}     {alpha:10.6f}   {se:10.6f}   {z_stat:8.3f}   {pval:8.3f} {significance}")
+        else:
+            for i, alpha in enumerate(self.alphas, 1):
+                lines.append(f"  α{i:2d} = {alpha:10.6f}")
         lines.append("")
         
         # Parallel-lines coefficients
         if self.beta_pl is not None and self.pl_vars:
             lines.append("Parallel-Lines Coefficients (same across all thresholds):")
-            lines.append("-" * 55)
-            for var, coef in zip(self.pl_vars, self.beta_pl):
-                lines.append(f"  {var:15s} = {coef:10.6f}")
+            lines.append("-" * 65)
+            if self.se_beta_pl is not None and self.pvalues_beta_pl is not None:
+                lines.append("                Coef.      Std.Err         z        P>|z|")
+                lines.append("-" * 65)
+                for var, coef, se, pval in zip(self.pl_vars, self.beta_pl, self.se_beta_pl, self.pvalues_beta_pl):
+                    z_stat = coef / se if se > 0 else 0
+                    significance = "***" if pval < 0.001 else "**" if pval < 0.01 else "*" if pval < 0.05 else ""
+                    lines.append(f"  {var:8s}  {coef:10.6f}   {se:10.6f}   {z_stat:8.3f}   {pval:8.3f} {significance}")
+            else:
+                for var, coef in zip(self.pl_vars, self.beta_pl):
+                    lines.append(f"  {var:15s} = {coef:10.6f}")
             lines.append("")
         
         # Non-parallel coefficients
         if self.beta_npl is not None:
             npl_names = [n for n in self.feature_names if self.pl_vars is None or n not in self.pl_vars]
-            lines.append("Non-Parallel Coefficients (vary by threshold):")
-            lines.append("-" * 50)
+            if self.pl_vars is None or len(self.pl_vars) == 0:
+                lines.append("Non-Parallel Coefficients (all variables vary by threshold):")
+            else:
+                lines.append("Non-Parallel Coefficients (vary by threshold):")
+            lines.append("-" * 65)
             for j in range(self.beta_npl.shape[0]):
                 lines.append(f"  Equation {j+1}:")
-                for var, coef in zip(npl_names, self.beta_npl[j]):
-                    lines.append(f"    {var:15s} = {coef:10.6f}")
+                if self.se_beta_npl is not None and self.pvalues_beta_npl is not None:
+                    lines.append("                Coef.      Std.Err         z        P>|z|")
+                    lines.append("    " + "-" * 61)
+                    for var, coef, se, pval in zip(npl_names, self.beta_npl[j], self.se_beta_npl[j], self.pvalues_beta_npl[j]):
+                        z_stat = coef / se if se > 0 else 0
+                        significance = "***" if pval < 0.001 else "**" if pval < 0.01 else "*" if pval < 0.05 else ""
+                        lines.append(f"    {var:8s}  {coef:10.6f}   {se:10.6f}   {z_stat:8.3f}   {pval:8.3f} {significance}")
+                else:
+                    for var, coef in zip(npl_names, self.beta_npl[j]):
+                        lines.append(f"    {var:15s} = {coef:10.6f}")
             lines.append("")
         
         lines.append("=" * 70)
@@ -555,6 +638,9 @@ class GeneralizedOrderedModel:
             message=str(opt.message),
             hess_inv=hess_inv,
         )
+        
+        # 计算标准误、p值和pseudo R2
+        result = self._compute_statistics(X_np, y_np, result)
 
         # Save fitted state on the model
         self.categories_ = categories
@@ -808,32 +894,451 @@ class GeneralizedOrderedModel:
 
         return p_cat.T  # (n, M)
 
-    def compute_numerical_hessian(self, method: str = "2-point") -> Optional[np.ndarray]:
+    def compute_numerical_hessian(self, X: np.ndarray, y: np.ndarray, method: str = "3-point") -> Optional[dict]:
         """Compute numerical Hessian at the fitted parameters.
         
         Returns the inverse Hessian (approximate covariance matrix) if successful.
         This provides more reliable standard errors than L-BFGS-B's low-rank approximation.
+        
+        Parameters:
+        - X: feature matrix used during fitting  
+        - y: response vector used during fitting
+        - method: finite difference method ("2-point", "3-point", "cs")
         """
         if self._result is None:
             raise RuntimeError("Model is not fitted. Call fit() first.")
         
         try:
+            # 优先尝试SciPy的内部API
             from scipy.optimize._numdiff import approx_derivative
+        except ImportError:
+            try:
+                # 后备：检查是否在公开API中
+                from scipy.optimize import approx_derivative
+            except ImportError:
+                try:
+                    # 再后备：检查更早版本的位置
+                    from scipy.misc import approx_fprime as approx_derivative_fallback
+                    print("[gologit2] Warning: Using fallback derivative approximation.")
+                    print("[gologit2] Consider upgrading SciPy for better numerical differentiation.")
+                    approx_derivative = approx_derivative_fallback
+                except ImportError:
+                    raise ImportError(
+                        "Cannot find numerical differentiation function. "
+                        "Please upgrade SciPy (>= 1.0 recommended) or install numdifftools."
+                    )
             
-            # Reconstruct the objective function used during fitting
-            # This is a simplified version - in practice you'd want to store more state
             print("[gologit2] Computing numerical Hessian (this may take a moment)...")
             
-            # For now, return None and suggest using bootstrap
-            print("[gologit2] Numerical Hessian computation not yet implemented.")
-            print("[gologit2] Consider using bootstrap_se() for standard errors.")
-            return None
+            # Reconstruct objective function from fitted model state
+            res = self._result
             
+            # Convert y to category indices
+            categories = res.categories
+            cat_to_index = {c: i for i, c in enumerate(categories)}
+            y_idx = np.vectorize(cat_to_index.get)(y)
+            n, p = X.shape
+            M = categories.size
+            K = M - 1
+            
+            # Set up parallel-lines masks
+            pl_vars = set(res.pl_vars or [])
+            pl_mask = np.array([name in pl_vars for name in res.feature_names], dtype=bool)
+            npl_mask = ~pl_mask
+            p_pl = int(pl_mask.sum())
+            p_npl = p - p_pl
+            
+            X_pl = X[:, pl_mask] if p_pl > 0 else None
+            X_npl = X[:, npl_mask] if p_npl > 0 else None
+            
+            def pack_params(alpha_free: np.ndarray, bpl: Optional[np.ndarray], bnpl: Optional[np.ndarray]) -> np.ndarray:
+                parts: List[np.ndarray] = [alpha_free.ravel()]
+                if bpl is not None:
+                    parts.append(bpl.ravel())
+                if bnpl is not None:
+                    parts.append(bnpl.ravel())
+                return np.concatenate(parts) if parts else np.array([], dtype=float)
+
+            def unpack_params(theta: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
+                pos = 0
+                alpha_free = theta[pos : pos + K]
+                pos += K
+                alphas = _free_to_monotonic_cutpoints(alpha_free)
+                bpl = None
+                if p_pl > 0:
+                    bpl = theta[pos : pos + p_pl]
+                    pos += p_pl
+                bnpl = None
+                if p_npl > 0:
+                    bnpl = theta[pos : pos + K * p_npl].reshape(K, p_npl)
+                    pos += K * p_npl
+                return alphas, bpl, bnpl
+            
+            def neg_log_likelihood(theta: np.ndarray) -> float:
+                """Negative log-likelihood function for Hessian computation."""
+                alphas, bpl, bnpl = unpack_params(theta)
+                
+                # Compute linear predictors
+                xb = alphas[:, np.newaxis]
+                if p_pl > 0 and X_pl is not None and bpl is not None:
+                    xb = xb + (X_pl @ bpl)[np.newaxis, :]
+                if p_npl > 0 and X_npl is not None and bnpl is not None:
+                    xb = xb + (bnpl @ X_npl.T)
+                
+                # Cumulative probabilities
+                F = _cumprob_from_xb(xb, res.link)
+                
+                # Check monotonicity
+                if K > 1 and np.any(np.diff(F, axis=0) < -1e-12):
+                    return np.inf
+                
+                # Category probabilities
+                p_cat = np.empty((M, n))
+                p_cat[0, :] = F[0, :]
+                for k_idx in range(1, M - 1):
+                    p_cat[k_idx, :] = F[k_idx, :] - F[k_idx - 1, :]
+                p_cat[M - 1, :] = 1.0 - F[K - 1, :]
+                
+                # Check non-negativity
+                if np.any(p_cat < -1e-12):
+                    return np.inf
+                
+                # Compute likelihood
+                obs_prob = p_cat[y_idx, np.arange(n)]
+                if np.any(obs_prob <= 0):
+                    return np.inf
+                    
+                return -np.sum(np.log(obs_prob))
+            
+            # Get current parameter vector
+            alpha_free = _monotonic_cutpoints_to_free(res.alphas)
+            theta_hat = pack_params(alpha_free, res.beta_pl, res.beta_npl)
+            
+            # Compute Hessian using finite differences with stable step size
+            rel_step = 1e-6  # 温和的步长，避免数值噪声
+            
+            def gradient_func(theta):
+                return approx_derivative(neg_log_likelihood, theta, method=method, rel_step=rel_step)
+            
+            hessian = approx_derivative(gradient_func, theta_hat, method=method, rel_step=rel_step)
+            
+            # 数值稳健化处理
+            # 1. 强制对称化 
+            hessian = 0.5 * (hessian + hessian.T)
+            
+            # 2. 检查条件数（使用对称矩阵专用的特征值计算）
+            eigenvals = np.linalg.eigvalsh(hessian)  # 返回实数特征值，已排序
+            min_eigval = eigenvals[0]   # 最小特征值
+            max_eigval = eigenvals[-1]  # 最大特征值
+            condition_number = max_eigval / min_eigval if min_eigval > 1e-16 else np.inf
+            
+            print(f"[gologit2] Hessian condition number: {condition_number:.2e}")
+            
+            # 3. 尝试稳健的求逆方法（分层策略：Cholesky -> solve -> pinv）
+            cov_matrix = None
+            inversion_method = ""
+            
+            # 首先尝试Cholesky分解（对正定矩阵最稳健）
+            try:
+                L = np.linalg.cholesky(hessian)
+                # 求逆：H^-1 = (L*L^T)^-1 = L^-T * L^-1
+                L_inv = np.linalg.inv(L)
+                cov_matrix = L_inv.T @ L_inv
+                inversion_method = "Cholesky decomposition"
+            except np.linalg.LinAlgError:
+                # Cholesky失败，尝试标准求逆
+                try:
+                    cov_matrix = np.linalg.inv(hessian)
+                    inversion_method = "standard matrix inversion"
+                except np.linalg.LinAlgError:
+                    # 标准求逆失败，使用伪逆
+                    try:
+                        cov_matrix = np.linalg.pinv(hessian, rcond=1e-12)
+                        inversion_method = "pseudo-inverse (SVD)"
+                        print("[gologit2] Warning: Matrix singular, using pseudo-inverse.")
+                    except np.linalg.LinAlgError:
+                        print("[gologit2] Error: All matrix inversion methods failed.")
+                        return None
+            
+            print(f"[gologit2] Hessian inverted using {inversion_method}.")
+            
+            # 4. 确保协方差矩阵对称性（统一处理浮点误差）
+            cov_matrix = 0.5 * (cov_matrix + cov_matrix.T)
+            
+            # 检查对角元素是否非负
+            diag_elements = np.diag(cov_matrix)
+            if np.any(diag_elements < 0):
+                print("[gologit2] Warning: Negative diagonal elements in covariance matrix.")
+                print("[gologit2] This suggests numerical instability - standard errors may be unreliable.")
+            
+            print("[gologit2] Numerical Hessian computed successfully.")
+            
+            # 返回协方差矩阵和诊断信息
+            return {
+                "cov_matrix": cov_matrix,
+                "hessian_condition_number": condition_number,
+                "inversion_method": inversion_method,
+                "method": method
+            }
+                
         except ImportError:
             print("[gologit2] Numerical Hessian requires scipy >= 1.0")
             return None
         except Exception as e:
             print(f"[gologit2] Failed to compute numerical Hessian: {e}")
+            return None
+    
+    def _compute_statistics(self, X: np.ndarray, y: np.ndarray, result: Gologit2Result) -> Gologit2Result:
+        """计算标准误、p值和pseudo R2等统计量"""
+        print("[gologit2] Computing standard errors, p-values, and pseudo R2...")
+        
+        try:
+            # 1. 计算null model的log-likelihood (仅包含cutpoints)
+            null_loglik = self._compute_null_loglikelihood(X, y, result)
+            result.null_loglik = null_loglik
+            
+            # 2. 计算pseudo R2
+            if null_loglik is not None:
+                result.pseudo_r2 = 1 - (result.fun / (-null_loglik))
+                
+                # 计算参数个数用于调整的R2
+                n_params = len(result.alphas)
+                if result.beta_pl is not None:
+                    n_params += len(result.beta_pl)
+                if result.beta_npl is not None:
+                    n_params += result.beta_npl.size
+                
+                # 修正的McFadden调整R²公式：1 - ((LL_full - k) / LL_null)
+                # 其中 LL_full = -result.fun, LL_null = null_loglik
+                # 所以：1 - ((-result.fun - n_params) / null_loglik) = 1 - ((result.fun + n_params) / (-null_loglik))
+                result.pseudo_r2_adj = 1 - ((result.fun + n_params) / (-null_loglik))
+                
+                print(f"[gologit2] McFadden's Pseudo R2: {result.pseudo_r2:.4f}")
+                print(f"[gologit2] Adjusted Pseudo R2: {result.pseudo_r2_adj:.4f}")
+            else:
+                # null_loglik计算失败，无法计算伪R²
+                result.pseudo_r2 = None
+                result.pseudo_r2_adj = None
+                print("[gologit2] Warning: Could not compute null model likelihood.")
+                print("[gologit2] Pseudo R² statistics unavailable (likely due to sparse categories).")
+            
+            # 3. 计算标准误和p值
+            hessian_result = self.compute_numerical_hessian(X, y, method="3-point")
+            
+            if hessian_result is not None:
+                cov_matrix = hessian_result["cov_matrix"]
+                # 存储诊断信息
+                result.hessian_condition_number = hessian_result["hessian_condition_number"]
+                result.inversion_method = hessian_result["inversion_method"]
+                result.hessian_method = hessian_result["method"]
+                # 验证协方差矩阵维度
+                K = len(result.alphas)
+                n_beta_pl = len(result.beta_pl) if result.beta_pl is not None else 0
+                n_beta_npl = result.beta_npl.size if result.beta_npl is not None else 0
+                expected_dim = K + n_beta_pl + n_beta_npl
+                
+                if cov_matrix.shape != (expected_dim, expected_dim):
+                    raise ValueError(f"Covariance matrix dimension {cov_matrix.shape} != expected ({expected_dim}, {expected_dim})")
+                
+                # 报告协方差矩阵条件数（使用对称矩阵专用计算）
+                cov_eigenvals = np.linalg.eigvalsh(cov_matrix)  # 已排序的实数特征值
+                cov_min_eigval = cov_eigenvals[0]
+                cov_max_eigval = cov_eigenvals[-1]
+                cov_condition_number = cov_max_eigval / cov_min_eigval if cov_min_eigval > 1e-16 else np.inf
+                result.cov_condition_number = cov_condition_number
+                
+                print(f"[gologit2] Covariance matrix condition number: {cov_condition_number:.2e}")
+                print(f"[gologit2] Minimum eigenvalue: {cov_min_eigval:.6e}")
+                
+                if cov_condition_number > 1e12:
+                    print("[gologit2] WARNING: Very high condition number - standard errors may be unreliable")
+                
+                # 1. 对cutpoints使用Delta方法进行变换
+                # 构造雅可比矩阵 J = ∂α/∂θ_free，其中θ_free = [a1, d2, d3, ..., dK, β_pl, β_npl]
+                alpha_free = _monotonic_cutpoints_to_free(result.alphas)
+                jacobian_alpha = self._compute_cutpoints_jacobian(alpha_free)
+                
+                # 提取cutpoints部分的协方差矩阵 (前K×K块)
+                cov_alpha_free = cov_matrix[:K, :K]
+                
+                # Delta方法: Cov(α) = J * Cov(θ_free_alpha) * J^T
+                cov_alphas = jacobian_alpha @ cov_alpha_free @ jacobian_alpha.T
+                
+                # 检查对角元素非负
+                alpha_variances = np.diag(cov_alphas)
+                if np.any(alpha_variances < 0):
+                    print("[gologit2] WARNING: Negative variances detected for cutpoints")
+                    alpha_variances = np.maximum(alpha_variances, 1e-12)
+                
+                result.se_alphas = np.sqrt(alpha_variances)
+                
+                # 2. Beta系数的标准误（直接从协方差矩阵对角线）
+                pos = K
+                
+                # Parallel-lines系数标准误
+                if result.beta_pl is not None:
+                    beta_pl_variances = np.diag(cov_matrix[pos:pos+n_beta_pl, pos:pos+n_beta_pl])
+                    if np.any(beta_pl_variances < 0):
+                        print("[gologit2] WARNING: Negative variances detected for PL coefficients")
+                        beta_pl_variances = np.maximum(beta_pl_variances, 1e-12)
+                    result.se_beta_pl = np.sqrt(beta_pl_variances)
+                    pos += n_beta_pl
+                
+                # Non-parallel系数标准误
+                if result.beta_npl is not None:
+                    beta_npl_variances = np.diag(cov_matrix[pos:pos+n_beta_npl, pos:pos+n_beta_npl])
+                    if np.any(beta_npl_variances < 0):
+                        print("[gologit2] WARNING: Negative variances detected for NPL coefficients")
+                        beta_npl_variances = np.maximum(beta_npl_variances, 1e-12)
+                    result.se_beta_npl = np.sqrt(beta_npl_variances).reshape(result.beta_npl.shape)
+                
+                # 3. 计算p值 (双尾z-test)
+                result.pvalues_alphas = 2 * (1 - stats.norm.cdf(np.abs(result.alphas / result.se_alphas)))
+                
+                if result.beta_pl is not None and result.se_beta_pl is not None:
+                    z_pl = result.beta_pl / result.se_beta_pl
+                    result.pvalues_beta_pl = 2 * (1 - stats.norm.cdf(np.abs(z_pl)))
+                
+                if result.beta_npl is not None and result.se_beta_npl is not None:
+                    z_npl = result.beta_npl / result.se_beta_npl
+                    result.pvalues_beta_npl = 2 * (1 - stats.norm.cdf(np.abs(z_npl)))
+                
+                print("[gologit2] Standard errors computed using Delta method for cutpoints.")
+            else:
+                print("[gologit2] Could not compute standard errors (Hessian computation failed).")
+                
+        except Exception as e:
+            print(f"[gologit2] Error computing statistics: {e}")
+            print("[gologit2] Model estimation successful, but additional statistics unavailable.")
+        
+        return result
+    
+    def _compute_cutpoints_jacobian(self, alpha_free: np.ndarray) -> np.ndarray:
+        """计算从自由参数到原始cutpoints的雅可比矩阵。
+        
+        对于单调重参数化：α1 = a1, α2 = a1 + exp(d2), α3 = a1 + exp(d2) + exp(d3), ...
+        其中 alpha_free = [a1, d2, d3, ..., dK]
+        
+        雅可比矩阵 J[i,j] = ∂αᵢ/∂θⱼ：
+        - ∂α1/∂a1 = 1, ∂α1/∂dₖ = 0 for k > 1
+        - ∂α2/∂a1 = 1, ∂α2/∂d2 = exp(d2), ∂α2/∂dₖ = 0 for k > 2
+        - ∂αⱼ/∂a1 = 1, ∂αⱼ/∂dₖ = exp(dₖ) for k ≤ j, = 0 for k > j
+        """
+        K = len(alpha_free)
+        if K == 1:
+            return np.array([[1.0]])  # 只有一个cutpoint时
+            
+        jacobian = np.zeros((K, K))
+        
+        # 第一行：∂α1/∂θ = [1, 0, 0, ...]
+        jacobian[0, 0] = 1.0
+        
+        # 后续行：∂αⱼ/∂θ
+        for i in range(1, K):
+            jacobian[i, 0] = 1.0  # ∂αⱼ/∂a1 = 1
+            for j in range(1, i + 1):
+                jacobian[i, j] = np.exp(alpha_free[j])  # ∂αⱼ/∂dₖ = exp(dₖ) for k ≤ j
+        
+        # 安全性验证：检查Jacobian的基本性质
+        self._validate_cutpoints_jacobian(alpha_free, jacobian)
+                
+        return jacobian
+    
+    def _validate_cutpoints_jacobian(self, alpha_free: np.ndarray, jacobian: np.ndarray) -> None:
+        """验证cutpoints Jacobian的数值正确性"""
+        K = len(alpha_free)
+        
+        # 基本形状检查
+        assert jacobian.shape == (K, K), f"Jacobian shape {jacobian.shape} != ({K}, {K})"
+        
+        # 验证第一行应该是 [1, 0, 0, ...]
+        expected_first_row = np.zeros(K)
+        expected_first_row[0] = 1.0
+        assert np.allclose(jacobian[0, :], expected_first_row), "Jacobian first row incorrect"
+        
+        # 验证第一列应该全部是1（所有alpha对a1的偏导数都是1）
+        assert np.allclose(jacobian[:, 0], 1.0), "Jacobian first column should be all 1s"
+        
+        # 验证上三角部分为0（∂αᵢ/∂dⱼ = 0 when j > i）
+        for i in range(K):
+            for j in range(i + 1, K):
+                assert np.abs(jacobian[i, j]) < 1e-12, f"Upper triangle element [{i},{j}] should be 0"
+                
+        # 数值验证：用有限差分近似检查（只对小矩阵做）
+        if K <= 4:  # 避免大矩阵的计算开销
+            eps = 1e-8
+            for i in range(K):
+                for j in range(K):
+                    # 扰动第j个自由参数
+                    alpha_free_plus = alpha_free.copy()
+                    alpha_free_minus = alpha_free.copy()
+                    alpha_free_plus[j] += eps
+                    alpha_free_minus[j] -= eps
+                    
+                    # 计算αᵢ在扰动前后的值
+                    alpha_plus = _free_to_monotonic_cutpoints(alpha_free_plus)
+                    alpha_minus = _free_to_monotonic_cutpoints(alpha_free_minus)
+                    
+                    # 数值导数
+                    numerical_deriv = (alpha_plus[i] - alpha_minus[i]) / (2 * eps)
+                    analytical_deriv = jacobian[i, j]
+                    
+                    # 检查相对误差
+                    if abs(analytical_deriv) > 1e-10:
+                        rel_error = abs(numerical_deriv - analytical_deriv) / abs(analytical_deriv)
+                        assert rel_error < 1e-5, f"Jacobian[{i},{j}]: numerical={numerical_deriv:.8f}, analytical={analytical_deriv:.8f}, rel_error={rel_error:.2e}"
+    
+    def _compute_null_loglikelihood(self, X: np.ndarray, y: np.ndarray, result: Gologit2Result) -> Optional[float]:
+        """计算null model (仅包含cutpoints) 的log-likelihood。
+        
+        Null model是只包含cutpoints/intercepts而不包含协变量的模型。
+        对于累积链接函数（logit/probit/cloglog/loglog/cauchit），
+        使用经验累积比例的反函数来获得null cutpoints与拟合intercept-only的MLE等价。
+        
+        这种方法在样本量足够大时是准确的，但对于极端稀疏的类别可能不稳定。
+        为防止数值问题，使用与起始值相同的轻微收缩处理。
+        """
+        try:
+            # 转换y为索引
+            categories = result.categories
+            cat_to_index = {c: i for i, c in enumerate(categories)}
+            y_idx = np.vectorize(cat_to_index.get)(y)
+            n = len(y)
+            M = categories.size
+            K = M - 1
+            
+            # 计算经验概率
+            counts = np.bincount(y_idx, minlength=M).astype(float)
+            probs = counts / counts.sum()
+            cum_probs = np.cumsum(probs)[:-1]  # K个累积概率
+            
+            # 计算null model cutpoints（与起始值计算相同，包含轻微收缩以防止数值问题）
+            null_alphas = _inverse_start_cutpoint(cum_probs, result.link)
+            
+            # 计算null model的log-likelihood
+            # 每个观测的线性预测子只有cutpoint (无协变量)
+            xb_null = null_alphas[:, np.newaxis]  # shape (K, n)
+            F_null = _cumprob_from_xb(xb_null, result.link)
+            
+            # 类别概率
+            p_cat_null = np.empty((M, n))
+            p_cat_null[0, :] = F_null[0, :]
+            for k_idx in range(1, M - 1):
+                p_cat_null[k_idx, :] = F_null[k_idx, :] - F_null[k_idx - 1, :]
+            p_cat_null[M - 1, :] = 1.0 - F_null[K - 1, :]
+            
+            # 选择观测到的类别概率
+            obs_prob_null = p_cat_null[y_idx, np.arange(n)]
+            
+            # 检查概率是否有效
+            if np.any(obs_prob_null <= 0):
+                return None
+            
+            null_loglik = np.sum(np.log(obs_prob_null))
+            return null_loglik
+            
+        except Exception as e:
+            print(f"[gologit2] Warning: Could not compute null log-likelihood: {e}")
             return None
 
     def bootstrap_se(self, X: np.ndarray, y: np.ndarray, n_bootstrap: int = 100, 

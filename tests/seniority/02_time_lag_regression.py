@@ -257,6 +257,13 @@ def compute_ame_expected(model_obj, X_df, var_name):
     - 连续变量：数值导数 (E[Y|x+dx]-E[Y|x])/dx 的样本平均
     - 二元变量（0/1）：离散变化 E[Y|x=1]-E[Y|x=0] 的样本平均
     
+    注意：对于gologit2非平行变量，AME可能与单个系数方向不同。
+    这是正常现象，因为：
+    1. gologit2系数是"各cutpoint的差异"，不是"全局斜率"
+    2. 非平行变量在不同阈值的效应可能方向不同
+    3. AME是所有阈值效应的加权平均，更贴近实际平均效应
+    4. 解释时应优先使用AME，而非单个系数值
+    
     参数:
         model_obj: 已拟合的GeneralizedOrderedModel对象
         X_df: 设计矩阵DataFrame
@@ -414,16 +421,77 @@ for ctry in countries:
                 if not pd.api.types.is_numeric_dtype(s):
                     X_clean[col] = s.astype(float)
             
+            # === 增强数据验证：确保每列都有变异 ===
+            problem_cols = []
+            for col in list(X_clean.columns):
+                nunique = X_clean[col].nunique(dropna=False)
+                if nunique <= 1:
+                    problem_cols.append(f"{col}(nunique={nunique})")
+            
+            if problem_cols:
+                print(f"  {ctry}: WARNING: Found constant/problem columns: {problem_cols}")
+                # 移除问题列
+                for col in [c.split('(')[0] for c in problem_cols]:
+                    if col in X_clean.columns:
+                        X_clean.drop(columns=[col], inplace=True)
+                print(f"  {ctry}: Removed {len(problem_cols)} problematic columns")
+            
+            # 验证最终数据质量
+            final_nunique = {col: X_clean[col].nunique() for col in X_clean.columns}
+            min_nunique = min(final_nunique.values()) if final_nunique else 0
+            
             print(f"  {ctry}: 序数回归数据准备完成，{len(y_clean)} 观测值")
             print(f"  因变量分布: {dict(pd.Series(y_clean).value_counts().sort_index())}")
+            print(f"  特征变异性验证: 最小nunique={min_nunique}, 特征数={len(X_clean.columns)}")
+            
+            # 安全检查：确保至少有基本特征
+            if 'rarity_score_z' not in X_clean.columns:
+                print(f"  {ctry}: ERROR: rarity_score_z missing after data cleaning!")
+                continue
             
             # 使用自定义gologit2模型
             X_final = X_clean
             feature_names = list(X_final.columns)
             
-            # 创建GeneralizedOrderedModel并拟合
-            model = GeneralizedOrderedModel(link='logit', pl_vars=None)  # 无约束，所有变量non-parallel
-            print(f"  {ctry}: 开始拟合gologit2模型...")
+            # === PARALLEL CONSTRAINT STRATEGY ===
+            # Put most variables in parallel to reduce dimensionality and improve stability
+            # Only key variables (rarity_score_z) remain non-parallel for flexible effects
+            
+            # Variables that should be parallel (same effect across thresholds)
+            parallel_candidates = []
+            
+            # 1. All year dummies
+            year_vars = [col for col in feature_names if col.startswith('year_')]
+            parallel_candidates.extend(year_vars)
+            
+            # 2. Company size variables  
+            size_vars = [col for col in feature_names if 'company_size' in col.lower() or 'size' in col.lower()]
+            parallel_candidates.extend(size_vars)
+            
+            # 3. Internationalization variables
+            intl_vars = [col for col in feature_names if 'internationalization' in col.lower()]
+            parallel_candidates.extend(intl_vars)
+            
+            # 4. Educational degree variables
+            edu_vars = [col for col in feature_names if 'educational_degree' in col.lower() or 'bachelor' in col.lower() or 'degree' in col.lower()]
+            parallel_candidates.extend(edu_vars)
+            
+            # 5. Work experience and other controls
+            control_vars = [col for col in feature_names if col in ['work_years', 'gender_female']]
+            parallel_candidates.extend(control_vars)
+            
+            # Remove duplicates and ensure they exist in feature_names
+            pl_vars = list(set(parallel_candidates) & set(feature_names))
+            
+            # KEY INSIGHT: Only rarity_score_z remains non-parallel for flexible threshold effects
+            non_parallel_vars = [col for col in feature_names if col not in pl_vars]
+            
+            print(f"  {ctry}: Parallel variables (n={len(pl_vars)}): {pl_vars}")
+            print(f"  {ctry}: Non-parallel variables (n={len(non_parallel_vars)}): {non_parallel_vars}")
+            
+            # 创建GeneralizedOrderedModel并拟合 
+            model = GeneralizedOrderedModel(link='logit', pl_vars=pl_vars)  # Strategic parallel constraints
+            print(f"  {ctry}: 开始拟合gologit2模型（使用parallel约束策略）...")
             
             res = model.fit(
                 X_final.values, 
@@ -442,19 +510,34 @@ for ctry in countries:
             se = np.nan  
             pval = np.nan
             
+            # === 修正特征索引错位问题 ===
+            # 构造非平行变量名单（beta_npl对应的列顺序）
+            npl_names = [col for col in feature_names if col not in pl_vars]
+            print(f"  {ctry}: Non-parallel variable order: {npl_names}")
+            
             # 尝试从结果中获取rarity_score_z的系数、标准误和p值
-            if 'rarity_score_z' in feature_names:
-                var_idx = feature_names.index('rarity_score_z')
+            if 'rarity_score_z' in npl_names:
+                var_idx = npl_names.index('rarity_score_z')  # 在非平行变量列表中的正确索引
+                print(f"  {ctry}: rarity_score_z index in npl_names: {var_idx}")
+                
                 # gologit2的beta_npl是 (K, p_npl) 形状，每个阈值都有系数
                 if res.beta_npl is not None:
-                    coef = float(res.beta_npl[0, var_idx])  # 使用第一个阈值的系数作为代表
+                    print(f"  {ctry}: beta_npl shape: {res.beta_npl.shape}")
+                    if var_idx < res.beta_npl.shape[1]:  # 确保索引不越界
+                        coef = float(res.beta_npl[0, var_idx])  # 使用第一个阈值的系数作为代表
+                    else:
+                        print(f"  {ctry}: WARNING: var_idx {var_idx} >= beta_npl.shape[1] {res.beta_npl.shape[1]}")
                 
                 # 提取标准误和p值（如果可用）
                 if hasattr(res, 'se_beta_npl') and res.se_beta_npl is not None:
-                    se = float(res.se_beta_npl[0, var_idx])  # 第一个阈值的标准误
+                    if var_idx < res.se_beta_npl.shape[1]:
+                        se = float(res.se_beta_npl[0, var_idx])  # 第一个阈值的标准误
                 
                 if hasattr(res, 'pvalues_beta_npl') and res.pvalues_beta_npl is not None:
-                    pval = float(res.pvalues_beta_npl[0, var_idx])  # 第一个阈值的p值
+                    if var_idx < res.pvalues_beta_npl.shape[1]:
+                        pval = float(res.pvalues_beta_npl[0, var_idx])  # 第一个阈值的p值
+            else:
+                print(f"  {ctry}: WARNING: rarity_score_z not found in non-parallel variables: {npl_names}")
             
             # 提取pseudo R2
             pseudo_r2 = getattr(res, 'pseudo_r2', np.nan)
@@ -560,12 +643,54 @@ for ctry in countries:
                 if not pd.api.types.is_numeric_dtype(s):
                     X_simple_clean[col] = s.astype(float)
             
+            # === 增强简化模型数据验证 ===
+            problem_cols_simple = []
+            for col in list(X_simple_clean.columns):
+                nunique = X_simple_clean[col].nunique(dropna=False)
+                if nunique <= 1:
+                    problem_cols_simple.append(f"{col}(nunique={nunique})")
+            
+            if problem_cols_simple:
+                print(f"  {ctry}: 简化模型 WARNING: Found constant columns: {problem_cols_simple}")
+                for col in [c.split('(')[0] for c in problem_cols_simple]:
+                    if col in X_simple_clean.columns:
+                        X_simple_clean.drop(columns=[col], inplace=True)
+                print(f"  {ctry}: 简化模型 Removed {len(problem_cols_simple)} problematic columns")
+            
+            # 验证简化模型数据质量
+            final_nunique_simple = {col: X_simple_clean[col].nunique() for col in X_simple_clean.columns}
+            min_nunique_simple = min(final_nunique_simple.values()) if final_nunique_simple else 0
+            
             print(f"  {ctry}: 简化模型，变量: {list(X_simple_clean.columns)}, 观测值: {len(y_simple_clean)}")
+            print(f"  {ctry}: 简化模型 特征变异性: 最小nunique={min_nunique_simple}")
+            
+            # 安全检查
+            if 'rarity_score_z' not in X_simple_clean.columns:
+                print(f"  {ctry}: 简化模型 ERROR: rarity_score_z missing after cleaning!")
+                continue
             
             # 使用自定义gologit2简化模型
             feature_names_simple = list(X_simple_clean.columns)
-            model_simple = GeneralizedOrderedModel(link='logit', pl_vars=None)
-            print(f"  {ctry}: 开始拟合简化gologit2模型...")
+            
+            # === PARALLEL CONSTRAINT FOR SIMPLIFIED MODEL ===
+            # For simplified model, put most control variables in parallel
+            # Only rarity_score_z remains non-parallel
+            
+            pl_vars_simple = []
+            
+            # Put year dummies and basic controls in parallel 
+            for col in feature_names_simple:
+                if col.startswith('year_') or col in ['work_years', 'gender_female']:
+                    pl_vars_simple.append(col)
+            
+            # Ensure rarity_score_z is non-parallel (key variable)
+            non_parallel_simple = [col for col in feature_names_simple if col not in pl_vars_simple]
+            
+            print(f"  {ctry}: 简化模型 - Parallel variables: {pl_vars_simple}")
+            print(f"  {ctry}: 简化模型 - Non-parallel variables: {non_parallel_simple}")
+            
+            model_simple = GeneralizedOrderedModel(link='logit', pl_vars=pl_vars_simple)
+            print(f"  {ctry}: 开始拟合简化gologit2模型（使用parallel约束）...")
             
             res_simple = model_simple.fit(
                 X_simple_clean.values,
@@ -584,17 +709,32 @@ for ctry in countries:
             se = np.nan  
             pval = np.nan
             
-            if 'rarity_score_z' in feature_names_simple:
-                var_idx = feature_names_simple.index('rarity_score_z')
+            # === 修正简化模型特征索引错位问题 ===
+            # 构造简化模型的非平行变量名单（beta_npl对应的列顺序）
+            npl_names_simple = [col for col in feature_names_simple if col not in pl_vars_simple]
+            print(f"  {ctry}: 简化模型 Non-parallel variable order: {npl_names_simple}")
+            
+            if 'rarity_score_z' in npl_names_simple:
+                var_idx = npl_names_simple.index('rarity_score_z')  # 在非平行变量列表中的正确索引
+                print(f"  {ctry}: 简化模型 rarity_score_z index in npl_names: {var_idx}")
+                
                 if res_simple.beta_npl is not None:
-                    coef = float(res_simple.beta_npl[0, var_idx])  # 使用第一个阈值的系数作为代表
+                    print(f"  {ctry}: 简化模型 beta_npl shape: {res_simple.beta_npl.shape}")
+                    if var_idx < res_simple.beta_npl.shape[1]:  # 确保索引不越界
+                        coef = float(res_simple.beta_npl[0, var_idx])  # 使用第一个阈值的系数作为代表
+                    else:
+                        print(f"  {ctry}: 简化模型 WARNING: var_idx {var_idx} >= beta_npl.shape[1] {res_simple.beta_npl.shape[1]}")
                 
                 # 提取标准误和p值（如果可用）
                 if hasattr(res_simple, 'se_beta_npl') and res_simple.se_beta_npl is not None:
-                    se = float(res_simple.se_beta_npl[0, var_idx])  # 第一个阈值的标准误
+                    if var_idx < res_simple.se_beta_npl.shape[1]:
+                        se = float(res_simple.se_beta_npl[0, var_idx])  # 第一个阈值的标准误
                 
                 if hasattr(res_simple, 'pvalues_beta_npl') and res_simple.pvalues_beta_npl is not None:
-                    pval = float(res_simple.pvalues_beta_npl[0, var_idx])  # 第一个阈值的p值
+                    if var_idx < res_simple.pvalues_beta_npl.shape[1]:
+                        pval = float(res_simple.pvalues_beta_npl[0, var_idx])  # 第一个阈值的p值
+            else:
+                print(f"  {ctry}: 简化模型 WARNING: rarity_score_z not found in non-parallel variables: {npl_names_simple}")
             
             # 提取pseudo R2
             pseudo_r2 = getattr(res_simple, 'pseudo_r2', np.nan)
@@ -704,8 +844,15 @@ with open(report_path, "w", encoding="utf-8") as f:
     f.write(lag_results_summary.to_string(index=False))
     f.write("\n\n")
 
-    # 写入各国“系数的平均边际效应（对期望职级E[Y]）”
+    # 写入各国"系数的平均边际效应（对期望职级E[Y]）"
     f.write("Average Marginal Effects (on expected seniority, E[Y]) by Country:\n\n")
+    f.write("IMPORTANT NOTE: For gologit2 non-parallel variables, AME may differ from individual coefficients.\n")
+    f.write("This is normal because:\n")
+    f.write("1. gologit2 coefficients represent 'cutpoint-specific differences', not 'global slopes'\n")
+    f.write("2. Non-parallel variables can have opposite effects at different thresholds\n")
+    f.write("3. AME is a weighted average across all thresholds, closer to actual average effect\n")
+    f.write("4. Use AME for interpretation, not individual coefficient values\n\n")
+    
     for ctry in countries:
         ame_key = (ctry, 'ordered_logit_lag_ame_rarity') if (ctry, 'ordered_logit_lag_ame_rarity') in models else (
                   (ctry, 'ordered_logit_lag_simple_ame_rarity') if (ctry, 'ordered_logit_lag_simple_ame_rarity') in models else None)

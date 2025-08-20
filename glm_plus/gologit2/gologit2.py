@@ -93,39 +93,39 @@ def _cdf_cauchit(z: np.ndarray) -> np.ndarray:
 
 
 def _cumprob_from_xb(xb: np.ndarray, link: str) -> np.ndarray:
-    """Compute the cumulative probability F_j for each xb_j per Stata's rules.
+    """Compute the cumulative probability F_j for each xb_j.
 
-    Stata's gologit2 defines F(XB_j) differently by link:
-    - logit/probit: F_j = CDF(-xb_j)
+    CORRECTED PARAMETERIZATION: xb = alpha_j - X*beta (standard form)
+    All links now use F(xb) directly since xb already has correct sign:
+    - logit/probit: F_j = CDF(xb_j)  [FIXED: removed negative sign]
     - cloglog:      F_j = exp(-exp(xb_j))
     - loglog:       F_j = 1 - exp(-exp(-xb_j))
-    - cauchit:      F_j = 0.5 + (1/pi) * atan(-xb_j)
+    - cauchit:      F_j = 0.5 + (1/pi) * atan(xb_j)  [FIXED: removed negative sign]
     """
     if link == "logit":
-        return _cdf_logit(-xb)
+        return _cdf_logit(xb)  # FIXED: removed negative sign
     if link == "probit":
-        return _cdf_probit(-xb)
+        return _cdf_probit(xb)  # FIXED: removed negative sign
     if link == "cloglog":
         return _cdf_cloglog(xb)
     if link == "loglog":
         return _cdf_loglog(-xb)
     if link == "cauchit":
-        return _cdf_cauchit(-xb)
+        return _cdf_cauchit(xb)  # FIXED: removed negative sign
     raise ValueError(f"Unsupported link: {link}")
 
 
 def _inverse_start_cutpoint(cum_p: np.ndarray, link: str) -> np.ndarray:
     """Start values for the cutpoints (alphas) from cumulative probabilities.
 
-    For each link, we invert the cumulative function F to get an initial
-    cutpoint value that roughly matches the observed cumulative shares.
-    This mimics Stata's Start_Values logic:
+    CORRECTED PARAMETERIZATION: F(alpha_j - X*beta) = cum_p
+    When X=0 (intercept only), F(alpha_j) = cum_p, so alpha_j = F^{-1}(cum_p)
 
-    - logit:   alpha_j = -logit(cum_p)
-    - probit:  alpha_j = -Phi^{-1}(cum_p)
-    - cloglog: alpha_j = cloglog(1 - cum_p) = log(-log(cum_p))
-    - loglog:  alpha_j = -cloglog(cum_p)    = -log(-log(1 - cum_p))
-    - cauchit: alpha_j = -tan(pi * (cum_p - 0.5))
+    - logit:   alpha_j = logit(cum_p) = log(cum_p/(1-cum_p))  [FIXED: removed negative]
+    - probit:  alpha_j = Phi^{-1}(cum_p)  [FIXED: removed negative]
+    - cloglog: alpha_j = log(-log(1-cum_p))  [FIXED: adjusted for standard form]
+    - loglog:  alpha_j = -log(-log(cum_p))  [unchanged]
+    - cauchit: alpha_j = tan(pi * (cum_p - 0.5))  [FIXED: removed negative]
     """
     eps = 1e-9
     # Apply gentle shrinkage for sparse categories to avoid extreme initial values
@@ -134,15 +134,15 @@ def _inverse_start_cutpoint(cum_p: np.ndarray, link: str) -> np.ndarray:
     p = np.clip(p, eps, 1.0 - eps)
     
     if link == "logit":
-        return -np.log(p / (1.0 - p))
+        return np.log(p / (1.0 - p))  # FIXED: removed negative sign
     if link == "probit":
-        return -stats.norm.ppf(p)
+        return stats.norm.ppf(p)  # FIXED: removed negative sign
     if link == "cloglog":
-        return np.log(-np.log(p))
+        return np.log(-np.log(1.0 - p))  # FIXED: changed to standard form
     if link == "loglog":
-        return -np.log(-np.log(1.0 - p))
+        return -np.log(-np.log(p))  # FIXED: adjusted for consistency
     if link == "cauchit":
-        return -np.tan(math.pi * (p - 0.5))
+        return np.tan(math.pi * (p - 0.5))  # FIXED: removed negative sign
     raise ValueError(f"Unsupported link: {link}")
 
 
@@ -419,8 +419,8 @@ class GeneralizedOrderedModel:
         X: Union[np.ndarray, Any],
         y: Union[np.ndarray, Sequence],
         feature_names: Optional[Sequence[str]] = None,
-        maxiter: int = 200,
-        tol: float = 1e-6,
+        maxiter: int = 2000,
+        tol: float = 1e-5,
         verbose: bool = True,
         optimizer: str = "L-BFGS-B",
     ) -> Gologit2Result:
@@ -498,6 +498,10 @@ class GeneralizedOrderedModel:
         probs = counts / counts.sum()
         cum_probs = np.cumsum(probs)[:-1]  # length K
         alpha0 = _inverse_start_cutpoint(cum_probs, self.link)
+        # NUMERICAL SAFETY: Clip initial cutpoints to prevent extreme values
+        alpha0 = np.clip(alpha0, -8.0, 8.0)
+        if verbose:
+            print(f"[gologit2] Initial cutpoints (clipped): {alpha0}")
         # Convert to monotonic-constrained parameterization
         alpha0_free = _monotonic_cutpoints_to_free(alpha0)
         # start betas at 0
@@ -550,25 +554,28 @@ class GeneralizedOrderedModel:
             """
             alphas, bpl, bnpl = unpack_params(theta)
 
-            # Vectorized computation of linear predictors for all thresholds
+            # CORRECTED: Standard parameterization xb = alpha_j - X*beta
             # xb shape: (K, n)
             xb = alphas[:, np.newaxis]  # broadcast alphas to (K, 1)
             
             if p_pl > 0 and X_pl is not None and bpl is not None:
-                # Add parallel-lines contribution (same for all thresholds)
-                xb = xb + (X_pl @ bpl)[np.newaxis, :]  # broadcast to (K, n)
+                # SUBTRACT parallel-lines contribution (same for all thresholds)
+                xb = xb - (X_pl @ bpl)[np.newaxis, :]  # FIXED: changed + to -
             
             if p_npl > 0 and X_npl is not None and bnpl is not None:
-                # Add non-parallel contribution (different for each threshold)
-                xb = xb + (bnpl @ X_npl.T)  # (K, p_npl) @ (p_npl, n) = (K, n)
+                # SUBTRACT non-parallel contribution (different for each threshold)
+                xb = xb - (bnpl @ X_npl.T)  # FIXED: changed + to -
 
             # Cumulative probabilities F_j per threshold j
             F = _cumprob_from_xb(xb, self.link)  # shape (K, n)
             
-            # STRICT CHECK: Ensure F is monotonic (F_j >= F_{j-1} for all j > 1)
-            # Vectorized check: diff along threshold axis should be non-negative
-            if K > 1 and np.any(np.diff(F, axis=0) < -1e-12):  # allow tiny numerical tolerance
-                return np.inf  # infeasible parameters
+            # SOFT CHECK: Ensure F is monotonic with penalty instead of hard rejection
+            penalty = 0.0
+            if K > 1:
+                f_diffs = np.diff(F, axis=0)  # F_{j+1} - F_j for all j
+                violations = np.maximum(0, -f_diffs)  # negative diffs are violations
+                if np.any(violations > 0):
+                    penalty += 1e8 * np.sum(violations ** 2)  # quadratic penalty
             
             # Category probabilities p(y = category_k)
             # k = 0 (lowest): F1
@@ -580,20 +587,20 @@ class GeneralizedOrderedModel:
                 p_cat[k_idx, :] = F[k_idx, :] - F[k_idx - 1, :]
             p_cat[M - 1, :] = 1.0 - F[K - 1, :]
             
-            # STRICT CHECK: Ensure no negative probabilities
-            if np.any(p_cat < -1e-12):  # allow tiny numerical tolerance
-                return np.inf  # infeasible parameters
+            # SOFT CHECK: Penalize negative probabilities instead of hard rejection
+            neg_prob_violations = np.maximum(0, -p_cat)  # negative probs are violations
+            if np.any(neg_prob_violations > 0):
+                penalty += 1e8 * np.sum(neg_prob_violations ** 2)  # quadratic penalty
 
-            # Select the probability for the observed category and sum logs
+            # Select the probability for the observed category
             obs_prob = p_cat[y_idx, np.arange(n)]
             
-            # Final check: ensure observed probabilities are positive
-            if np.any(obs_prob <= 0):
-                return np.inf
+            # NUMERICAL SAFETY: Clip observed probabilities to prevent log(0)
+            obs_prob = np.clip(obs_prob, 1e-12, 1.0)
                 
-            return -np.sum(np.log(obs_prob))
+            return -np.sum(np.log(obs_prob)) + penalty
 
-        # Optimize with improved convergence criteria
+        # Optimize with improved convergence criteria and fallback strategies
         opt_options = {"maxiter": maxiter, "disp": bool(verbose), "gtol": tol}
         # Add ftol for more intuitive convergence (SciPy >= 1.11 supports ftol for L-BFGS-B)
         try:
@@ -601,12 +608,45 @@ class GeneralizedOrderedModel:
         except Exception:
             pass  # fallback for older SciPy versions
         
-        opt = optimize.minimize(
-            nll,
-            theta0,
-            method=optimizer,
-            options=opt_options,
-        )
+        if verbose:
+            print(f"[gologit2] Using optimizer: {optimizer}, maxiter: {maxiter}, tol: {tol}")
+        
+        # Try optimization with fallback strategies
+        optimization_success = False
+        opt = None
+        
+        # Primary optimization attempt
+        try:
+            opt = optimize.minimize(
+                nll,
+                theta0,
+                method=optimizer,
+                options=opt_options,
+            )
+            optimization_success = True
+        except Exception as e:
+            if verbose:
+                print(f"[gologit2] Primary optimizer {optimizer} failed: {e}")
+            
+            # Fallback to BFGS if L-BFGS-B failed
+            if optimizer == "L-BFGS-B":
+                try:
+                    if verbose:
+                        print("[gologit2] Trying fallback optimizer: BFGS")
+                    opt = optimize.minimize(
+                        nll,
+                        theta0,
+                        method="BFGS",
+                        options=opt_options,
+                    )
+                    optimization_success = True
+                except Exception as e2:
+                    if verbose:
+                        print(f"[gologit2] Fallback optimizer BFGS also failed: {e2}")
+        
+        if not optimization_success or opt is None:
+            raise RuntimeError(f"All optimization methods failed. Last error: {e}")
+        
 
         if verbose:
             status = "converged" if opt.success else "failed"
@@ -702,17 +742,17 @@ class GeneralizedOrderedModel:
         X_pl = X_np[:, pl_mask] if p_pl > 0 else None
         X_npl = X_np[:, npl_mask] if p_npl > 0 else None
 
-        # Vectorized computation of linear predictors for all thresholds
+        # CORRECTED: Standard parameterization xb = alpha_j - X*beta
         # xb shape: (K, n)
         xb = res.alphas[:, np.newaxis]  # broadcast alphas to (K, 1)
         
         if p_pl > 0 and X_pl is not None and res.beta_pl is not None:
-            # Add parallel-lines contribution (same for all thresholds)
-            xb = xb + (X_pl @ res.beta_pl)[np.newaxis, :]  # broadcast to (K, n)
+            # SUBTRACT parallel-lines contribution (same for all thresholds)
+            xb = xb - (X_pl @ res.beta_pl)[np.newaxis, :]  # FIXED: changed + to -
         
         if p_npl > 0 and X_npl is not None and res.beta_npl is not None:
-            # Add non-parallel contribution (different for each threshold)
-            xb = xb + (res.beta_npl @ X_npl.T)  # (K, p_npl) @ (p_npl, n) = (K, n)
+            # SUBTRACT non-parallel contribution (different for each threshold)
+            xb = xb - (res.beta_npl @ X_npl.T)  # FIXED: changed + to -
 
         # Cum probs and category probs
         F = _cumprob_from_xb(xb, link)
@@ -766,11 +806,12 @@ class GeneralizedOrderedModel:
         X_pl = X_np[:, pl_mask] if res.beta_pl is not None else None
         X_npl = X_np[:, npl_mask] if res.beta_npl is not None else None
 
+        # CORRECTED: Standard parameterization xb = alpha_j - X*beta
         xb_j = np.full(X_np.shape[0], res.alphas[eq - 1])
         if X_pl is not None and res.beta_pl is not None:
-            xb_j = xb_j + X_pl @ res.beta_pl
+            xb_j = xb_j - X_pl @ res.beta_pl  # FIXED: changed + to -
         if X_npl is not None and res.beta_npl is not None:
-            xb_j = xb_j + X_npl @ res.beta_npl[eq - 1]
+            xb_j = xb_j - X_npl @ res.beta_npl[eq - 1]  # FIXED: changed + to -
         return xb_j
 
     def _comprehensive_diagnostics(self, X: np.ndarray, verbose: bool = True) -> None:
@@ -796,12 +837,12 @@ class GeneralizedOrderedModel:
             X_pl = X[:, pl_mask] if p_pl > 0 else None
             X_npl = X[:, npl_mask] if p_npl > 0 else None
             
-            # Vectorized computation of F values
+            # CORRECTED: Standard parameterization xb = alpha_j - X*beta
             xb = res.alphas[:, np.newaxis]  # (K, 1)
             if p_pl > 0 and X_pl is not None and res.beta_pl is not None:
-                xb = xb + (X_pl @ res.beta_pl)[np.newaxis, :]  # (K, n)
+                xb = xb - (X_pl @ res.beta_pl)[np.newaxis, :]  # FIXED: changed + to -
             if p_npl > 0 and X_npl is not None and res.beta_npl is not None:
-                xb = xb + (res.beta_npl @ X_npl.T)  # (K, n)
+                xb = xb - (res.beta_npl @ X_npl.T)  # FIXED: changed + to -
             
             F = _cumprob_from_xb(xb, res.link)  # shape (K, n)
             
@@ -875,14 +916,14 @@ class GeneralizedOrderedModel:
         X_pl = X[:, pl_mask] if p_pl > 0 else None
         X_npl = X[:, npl_mask] if p_npl > 0 else None
 
-        # Vectorized computation of linear predictors
+        # CORRECTED: Standard parameterization xb = alpha_j - X*beta
         xb = res.alphas[:, np.newaxis]  # (K, 1)
         
         if p_pl > 0 and X_pl is not None and res.beta_pl is not None:
-            xb = xb + (X_pl @ res.beta_pl)[np.newaxis, :]  # (K, n)
+            xb = xb - (X_pl @ res.beta_pl)[np.newaxis, :]  # FIXED: changed + to -
         
         if p_npl > 0 and X_npl is not None and res.beta_npl is not None:
-            xb = xb + (res.beta_npl @ X_npl.T)  # (K, n)
+            xb = xb - (res.beta_npl @ X_npl.T)  # FIXED: changed + to -
 
         # Compute probabilities without safety clipping
         F = _cumprob_from_xb(xb, link)
@@ -894,7 +935,9 @@ class GeneralizedOrderedModel:
 
         return p_cat.T  # (n, M)
 
-    def compute_numerical_hessian(self, X: np.ndarray, y: np.ndarray, method: str = "3-point") -> Optional[dict]:
+    def compute_numerical_hessian(self, X: np.ndarray, y: np.ndarray, 
+                                   result: Optional[Gologit2Result] = None, 
+                                   method: str = "3-point") -> Optional[dict]:
         """Compute numerical Hessian at the fitted parameters.
         
         Returns the inverse Hessian (approximate covariance matrix) if successful.
@@ -903,11 +946,16 @@ class GeneralizedOrderedModel:
         Parameters:
         - X: feature matrix used during fitting  
         - y: response vector used during fitting
+        - result: Gologit2Result object (if None, uses self._result)
         - method: finite difference method ("2-point", "3-point", "cs")
         """
-        if self._result is None:
+        # Use provided result or fall back to self._result
+        res = result if result is not None else self._result
+        if res is None:
             raise RuntimeError("Model is not fitted. Call fit() first.")
         
+        # FIXED: Import hierarchy without putting computation in except block
+        approx_derivative = None
         try:
             # 优先尝试SciPy的内部API
             from scipy.optimize._numdiff import approx_derivative
@@ -923,170 +971,165 @@ class GeneralizedOrderedModel:
                     print("[gologit2] Consider upgrading SciPy for better numerical differentiation.")
                     approx_derivative = approx_derivative_fallback
                 except ImportError:
-                    raise ImportError(
-                        "Cannot find numerical differentiation function. "
-                        "Please upgrade SciPy (>= 1.0 recommended) or install numdifftools."
-                    )
+                    print("[gologit2] Error: Cannot find numerical differentiation function.")
+                    print("[gologit2] Please upgrade SciPy (>= 1.0 recommended) or install numdifftools.")
+                    return None
+        
+        if approx_derivative is None:
+            print("[gologit2] Error: Failed to import approx_derivative.")
+            return None
             
-            print("[gologit2] Computing numerical Hessian (this may take a moment)...")
-            
-            # Reconstruct objective function from fitted model state
-            res = self._result
-            
-            # Convert y to category indices
-            categories = res.categories
-            cat_to_index = {c: i for i, c in enumerate(categories)}
-            y_idx = np.vectorize(cat_to_index.get)(y)
-            n, p = X.shape
-            M = categories.size
-            K = M - 1
-            
-            # Set up parallel-lines masks
-            pl_vars = set(res.pl_vars or [])
-            pl_mask = np.array([name in pl_vars for name in res.feature_names], dtype=bool)
-            npl_mask = ~pl_mask
-            p_pl = int(pl_mask.sum())
-            p_npl = p - p_pl
-            
-            X_pl = X[:, pl_mask] if p_pl > 0 else None
-            X_npl = X[:, npl_mask] if p_npl > 0 else None
-            
-            def pack_params(alpha_free: np.ndarray, bpl: Optional[np.ndarray], bnpl: Optional[np.ndarray]) -> np.ndarray:
-                parts: List[np.ndarray] = [alpha_free.ravel()]
-                if bpl is not None:
-                    parts.append(bpl.ravel())
-                if bnpl is not None:
-                    parts.append(bnpl.ravel())
-                return np.concatenate(parts) if parts else np.array([], dtype=float)
+        print("[gologit2] Computing numerical Hessian (this may take a moment)...")
+        
+        # Use the provided or retrieved result object
+        
+        # Convert y to category indices
+        categories = res.categories
+        cat_to_index = {c: i for i, c in enumerate(categories)}
+        y_idx = np.vectorize(cat_to_index.get)(y)
+        n, p = X.shape
+        M = categories.size
+        K = M - 1
+        
+        # Set up parallel-lines masks
+        pl_vars = set(res.pl_vars or [])
+        pl_mask = np.array([name in pl_vars for name in res.feature_names], dtype=bool)
+        npl_mask = ~pl_mask
+        p_pl = int(pl_mask.sum())
+        p_npl = p - p_pl
+        
+        X_pl = X[:, pl_mask] if p_pl > 0 else None
+        X_npl = X[:, npl_mask] if p_npl > 0 else None
+        
+        def pack_params(alpha_free: np.ndarray, bpl: Optional[np.ndarray], bnpl: Optional[np.ndarray]) -> np.ndarray:
+            parts: List[np.ndarray] = [alpha_free.ravel()]
+            if bpl is not None:
+                parts.append(bpl.ravel())
+            if bnpl is not None:
+                parts.append(bnpl.ravel())
+            return np.concatenate(parts) if parts else np.array([], dtype=float)
 
-            def unpack_params(theta: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
-                pos = 0
-                alpha_free = theta[pos : pos + K]
-                pos += K
-                alphas = _free_to_monotonic_cutpoints(alpha_free)
-                bpl = None
-                if p_pl > 0:
-                    bpl = theta[pos : pos + p_pl]
-                    pos += p_pl
-                bnpl = None
-                if p_npl > 0:
-                    bnpl = theta[pos : pos + K * p_npl].reshape(K, p_npl)
-                    pos += K * p_npl
-                return alphas, bpl, bnpl
+        def unpack_params(theta: np.ndarray) -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
+            pos = 0
+            alpha_free = theta[pos : pos + K]
+            pos += K
+            alphas = _free_to_monotonic_cutpoints(alpha_free)
+            bpl = None
+            if p_pl > 0:
+                bpl = theta[pos : pos + p_pl]
+                pos += p_pl
+            bnpl = None
+            if p_npl > 0:
+                bnpl = theta[pos : pos + K * p_npl].reshape(K, p_npl)
+                pos += K * p_npl
+            return alphas, bpl, bnpl
+        
+        def neg_log_likelihood(theta: np.ndarray) -> float:
+            """Negative log-likelihood function for Hessian computation."""
+            alphas, bpl, bnpl = unpack_params(theta)
             
-            def neg_log_likelihood(theta: np.ndarray) -> float:
-                """Negative log-likelihood function for Hessian computation."""
-                alphas, bpl, bnpl = unpack_params(theta)
+            # CORRECTED: Standard parameterization xb = alpha_j - X*beta
+            xb = alphas[:, np.newaxis]
+            if p_pl > 0 and X_pl is not None and bpl is not None:
+                xb = xb - (X_pl @ bpl)[np.newaxis, :]  # FIXED: changed + to -
+            if p_npl > 0 and X_npl is not None and bnpl is not None:
+                xb = xb - (bnpl @ X_npl.T)  # FIXED: changed + to -
+            
+            # Cumulative probabilities
+            F = _cumprob_from_xb(xb, res.link)
+            
+            # Check monotonicity
+            if K > 1 and np.any(np.diff(F, axis=0) < -1e-12):
+                return np.inf
+            
+            # Category probabilities
+            p_cat = np.empty((M, n))
+            p_cat[0, :] = F[0, :]
+            for k_idx in range(1, M - 1):
+                p_cat[k_idx, :] = F[k_idx, :] - F[k_idx - 1, :]
+            p_cat[M - 1, :] = 1.0 - F[K - 1, :]
+            
+            # Check non-negativity
+            if np.any(p_cat < -1e-12):
+                return np.inf
+            
+            # Compute likelihood
+            obs_prob = p_cat[y_idx, np.arange(n)]
+            if np.any(obs_prob <= 0):
+                return np.inf
                 
-                # Compute linear predictors
-                xb = alphas[:, np.newaxis]
-                if p_pl > 0 and X_pl is not None and bpl is not None:
-                    xb = xb + (X_pl @ bpl)[np.newaxis, :]
-                if p_npl > 0 and X_npl is not None and bnpl is not None:
-                    xb = xb + (bnpl @ X_npl.T)
-                
-                # Cumulative probabilities
-                F = _cumprob_from_xb(xb, res.link)
-                
-                # Check monotonicity
-                if K > 1 and np.any(np.diff(F, axis=0) < -1e-12):
-                    return np.inf
-                
-                # Category probabilities
-                p_cat = np.empty((M, n))
-                p_cat[0, :] = F[0, :]
-                for k_idx in range(1, M - 1):
-                    p_cat[k_idx, :] = F[k_idx, :] - F[k_idx - 1, :]
-                p_cat[M - 1, :] = 1.0 - F[K - 1, :]
-                
-                # Check non-negativity
-                if np.any(p_cat < -1e-12):
-                    return np.inf
-                
-                # Compute likelihood
-                obs_prob = p_cat[y_idx, np.arange(n)]
-                if np.any(obs_prob <= 0):
-                    return np.inf
-                    
-                return -np.sum(np.log(obs_prob))
-            
-            # Get current parameter vector
-            alpha_free = _monotonic_cutpoints_to_free(res.alphas)
-            theta_hat = pack_params(alpha_free, res.beta_pl, res.beta_npl)
-            
-            # Compute Hessian using finite differences with stable step size
-            rel_step = 1e-6  # 温和的步长，避免数值噪声
-            
-            def gradient_func(theta):
-                return approx_derivative(neg_log_likelihood, theta, method=method, rel_step=rel_step)
-            
-            hessian = approx_derivative(gradient_func, theta_hat, method=method, rel_step=rel_step)
-            
-            # 数值稳健化处理
-            # 1. 强制对称化 
-            hessian = 0.5 * (hessian + hessian.T)
-            
-            # 2. 检查条件数（使用对称矩阵专用的特征值计算）
-            eigenvals = np.linalg.eigvalsh(hessian)  # 返回实数特征值，已排序
-            min_eigval = eigenvals[0]   # 最小特征值
-            max_eigval = eigenvals[-1]  # 最大特征值
-            condition_number = max_eigval / min_eigval if min_eigval > 1e-16 else np.inf
-            
-            print(f"[gologit2] Hessian condition number: {condition_number:.2e}")
-            
-            # 3. 尝试稳健的求逆方法（分层策略：Cholesky -> solve -> pinv）
-            cov_matrix = None
-            inversion_method = ""
-            
-            # 首先尝试Cholesky分解（对正定矩阵最稳健）
+            return -np.sum(np.log(obs_prob))
+        
+        # Get current parameter vector
+        alpha_free = _monotonic_cutpoints_to_free(res.alphas)
+        theta_hat = pack_params(alpha_free, res.beta_pl, res.beta_npl)
+        
+        # Compute Hessian using finite differences with stable step size
+        rel_step = 1e-6  # 温和的步长，避免数值噪声
+        
+        def gradient_func(theta):
+            return approx_derivative(neg_log_likelihood, theta, method=method, rel_step=rel_step)
+        
+        hessian = approx_derivative(gradient_func, theta_hat, method=method, rel_step=rel_step)
+        
+        # 数值稳健化处理
+        # 1. 强制对称化 
+        hessian = 0.5 * (hessian + hessian.T)
+        
+        # 2. 检查条件数（使用对称矩阵专用的特征值计算）
+        eigenvals = np.linalg.eigvalsh(hessian)  # 返回实数特征值，已排序
+        min_eigval = eigenvals[0]   # 最小特征值
+        max_eigval = eigenvals[-1]  # 最大特征值
+        condition_number = max_eigval / min_eigval if min_eigval > 1e-16 else np.inf
+        
+        print(f"[gologit2] Hessian condition number: {condition_number:.2e}")
+        
+        # 3. 尝试稳健的求逆方法（分层策略：Cholesky -> solve -> pinv）
+        cov_matrix = None
+        inversion_method = ""
+        
+        # 首先尝试Cholesky分解（对正定矩阵最稳健）
+        try:
+            L = np.linalg.cholesky(hessian)
+            # 求逆：H^-1 = (L*L^T)^-1 = L^-T * L^-1
+            L_inv = np.linalg.inv(L)
+            cov_matrix = L_inv.T @ L_inv
+            inversion_method = "Cholesky decomposition"
+        except np.linalg.LinAlgError:
+            # Cholesky失败，尝试标准求逆
             try:
-                L = np.linalg.cholesky(hessian)
-                # 求逆：H^-1 = (L*L^T)^-1 = L^-T * L^-1
-                L_inv = np.linalg.inv(L)
-                cov_matrix = L_inv.T @ L_inv
-                inversion_method = "Cholesky decomposition"
+                cov_matrix = np.linalg.inv(hessian)
+                inversion_method = "standard matrix inversion"
             except np.linalg.LinAlgError:
-                # Cholesky失败，尝试标准求逆
+                # 标准求逆失败，使用伪逆
                 try:
-                    cov_matrix = np.linalg.inv(hessian)
-                    inversion_method = "standard matrix inversion"
+                    cov_matrix = np.linalg.pinv(hessian, rcond=1e-12)
+                    inversion_method = "pseudo-inverse (SVD)"
+                    print("[gologit2] Warning: Matrix singular, using pseudo-inverse.")
                 except np.linalg.LinAlgError:
-                    # 标准求逆失败，使用伪逆
-                    try:
-                        cov_matrix = np.linalg.pinv(hessian, rcond=1e-12)
-                        inversion_method = "pseudo-inverse (SVD)"
-                        print("[gologit2] Warning: Matrix singular, using pseudo-inverse.")
-                    except np.linalg.LinAlgError:
-                        print("[gologit2] Error: All matrix inversion methods failed.")
-                        return None
-            
-            print(f"[gologit2] Hessian inverted using {inversion_method}.")
-            
-            # 4. 确保协方差矩阵对称性（统一处理浮点误差）
-            cov_matrix = 0.5 * (cov_matrix + cov_matrix.T)
-            
-            # 检查对角元素是否非负
-            diag_elements = np.diag(cov_matrix)
-            if np.any(diag_elements < 0):
-                print("[gologit2] Warning: Negative diagonal elements in covariance matrix.")
-                print("[gologit2] This suggests numerical instability - standard errors may be unreliable.")
-            
-            print("[gologit2] Numerical Hessian computed successfully.")
-            
-            # 返回协方差矩阵和诊断信息
-            return {
-                "cov_matrix": cov_matrix,
-                "hessian_condition_number": condition_number,
-                "inversion_method": inversion_method,
-                "method": method
-            }
-                
-        except ImportError:
-            print("[gologit2] Numerical Hessian requires scipy >= 1.0")
-            return None
-        except Exception as e:
-            print(f"[gologit2] Failed to compute numerical Hessian: {e}")
-            return None
+                    print("[gologit2] Error: All matrix inversion methods failed.")
+                    return None
+        
+        print(f"[gologit2] Hessian inverted using {inversion_method}.")
+        
+        # 4. 确保协方差矩阵对称性（统一处理浮点误差）
+        cov_matrix = 0.5 * (cov_matrix + cov_matrix.T)
+        
+        # 检查对角元素是否非负
+        diag_elements = np.diag(cov_matrix)
+        if np.any(diag_elements < 0):
+            print("[gologit2] Warning: Negative diagonal elements in covariance matrix.")
+            print("[gologit2] This suggests numerical instability - standard errors may be unreliable.")
+        
+        print("[gologit2] Numerical Hessian computed successfully.")
+        
+        # 返回协方差矩阵和诊断信息
+        return {
+            "cov_matrix": cov_matrix,
+            "hessian_condition_number": condition_number,
+            "inversion_method": inversion_method,
+            "method": method
+        }
     
     def _compute_statistics(self, X: np.ndarray, y: np.ndarray, result: Gologit2Result) -> Gologit2Result:
         """计算标准误、p值和pseudo R2等统计量"""
@@ -1123,7 +1166,7 @@ class GeneralizedOrderedModel:
                 print("[gologit2] Pseudo R² statistics unavailable (likely due to sparse categories).")
             
             # 3. 计算标准误和p值
-            hessian_result = self.compute_numerical_hessian(X, y, method="3-point")
+            hessian_result = self.compute_numerical_hessian(X, y, result, method="3-point")
             
             if hessian_result is not None:
                 cov_matrix = hessian_result["cov_matrix"]

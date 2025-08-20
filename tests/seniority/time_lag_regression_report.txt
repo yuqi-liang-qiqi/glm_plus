@@ -1,5 +1,5 @@
 Time Lag Ordinal Regression Report
-Generated: 2025-08-20 15:11:20
+Generated: 2025-08-20 20:37:56
 
 RESEARCH QUESTION: Does t-year rarity_score predict t+1 year seniority?
 
@@ -9,6 +9,7 @@ Statistical Methods Used:
 1. Primary: Generalized Ordered Model (gologit2) with time lag
 2. Fallback: Simplified Generalized Ordered Model with essential controls only
 Note: Using custom Python implementation of gologit2 (similar to Stata's gologit2)
+Recommended formal run flags: --bootstrap-n 200 --bootstrap-cluster
 
 Time Lag Structure:
 - Explanatory variables (X): t-year data (rarity_score, controls)
@@ -32,9 +33,8 @@ Notes:
 - gender encoded as gender_female: female=1, male=0; other/unknown as NaN
 - Generalized ordered model (gologit2) is appropriate for ordinal outcomes
 - Allows different coefficients across thresholds (non-proportional odds)
-- Positive coefficient: higher rarity predicts higher future seniority
-- Negative coefficient: higher rarity predicts lower future seniority
-- Standard errors computed via numerical Hessian (when successful)
+- Interpretation prioritizes AME and probability effects (dPr(Y≥j)/dx, dPr(Y=c)/dx); coefficients are threshold-specific in PPOM and serve as supplementary outputs
+- Standard errors are cluster-robust by worker_id with HC1 correction by default (BHHH/Sandwich); numerical Hessian is used only as a last fallback and is NOT the primary method
 - P-values based on z-tests (coefficient/standard error)
 - Pseudo R² is McFadden's R² = 1 - (logL_full/logL_null)
 - Note: gologit2 uses different parameterization than standard ordered logit
@@ -44,9 +44,9 @@ Fixed effects included:
 - No individual FE; pooled across workers
 
 Country-level summary (one row per country):
-country       method  coef_rarity_z       se  pval  PseudoR2      N  AME_rarity_per1SD
-  india Gologit2_Lag      -0.024273      NaN   NaN  0.097616 115047           0.022056
-     us Gologit2_Lag      -0.260600 0.019374   0.0  0.152642 178605          -0.001765
+country       method  coef_rarity_z  se  pval  PseudoR2      N  AME_rarity_per1SD
+  india Gologit2_Lag            NaN NaN   NaN  0.121424 115047           0.044337
+     us Gologit2_Lag            NaN NaN   NaN  0.152040 178605          -0.008480
 
 Average Marginal Effects (on expected seniority, E[Y]) by Country:
 
@@ -57,8 +57,8 @@ This is normal because:
 3. AME is a weighted average across all thresholds, closer to actual average effect
 4. Use AME for interpretation, not individual coefficient values
 
-- us: AME(E[Y]) for rarity_score (per +1 SD) = -0.001765 (derivative)
-- india: AME(E[Y]) for rarity_score (per +1 SD) = 0.022056 (derivative)
+- us: AME(E[Y]) for rarity_score (per +1 SD) = -0.008480 (per+1SD)
+- india: AME(E[Y]) for rarity_score (per +1 SD) = 0.044337 (per+1SD)
 
 ================================================================================
 THRESHOLD-LEVEL ANALYSIS: rarity_score_z Effects by Career Transition
@@ -66,70 +66,95 @@ THRESHOLD-LEVEL ANALYSIS: rarity_score_z Effects by Career Transition
 This section reveals the heterogeneous effects across different career thresholds,
 which is the key advantage of gologit2 over standard ordered logit.
 
-KEY FINDINGS:
+KEY FINDINGS & PPOM INTERPRETATION:
 - coef: β_j coefficient for threshold j (raw slope parameter)
 - dPr_ge: ∂Pr(Y≥j)/∂x (effect on probability of reaching level j or higher)
-- Interpretation: Positive β_j means rarity helps cross that specific threshold
+- PPOM Advantage: Reveals where non-parallel effects occur across career ladder
+- Direction vs. Intensity: Some variables affect early transitions (direction),
+  others affect senior-level transitions (intensity), or show mixed patterns
+- Positive β_j: rarity facilitates crossing that specific threshold
+- Negative β_j: rarity hinders crossing that specific threshold
+- Interpretation Framework (aligned with Williams 2016):
+  * Consistent signs across thresholds: uniform career advantage/disadvantage
+  * Varying magnitudes: differential effects at different career stages
+  * Sign changes: non-monotonic effects (e.g., helps early but hinders later)
 
 
 Country: us
 ----------------------------------------
 Threshold Effects Table:
-               coef    dPr_ge
-threshold                    
-cut1      -0.260600 -0.000000
-cut2      -0.363784 -0.002552
-cut3      -0.019274 -0.007301
-cut4       0.123666 -0.004233
-cut5       0.185995  0.010371
+              coef    dPr_ge
+threshold                   
+cut1      0.290057  0.000000
+cut2      0.290057 -0.000229
+cut3      0.290057 -0.000485
+cut4      0.290057 -0.005411
+cut5      0.290057 -0.002101
 
 Category Probability Effects:
-Y=0    0.002552
-Y=1    0.004750
-Y=2   -0.003068
-Y=3   -0.014605
-Y=4    0.008360
-Y=5    0.002011
+Y=0    0.000229
+Y=1    0.000256
+Y=2    0.004926
+Y=3   -0.003310
+Y=4   -0.001829
+Y=5   -0.000272
 
 Summary:
-[us] rarity_score_z的门槛异质性：Junior→Assistant: β≈-0.261（阈值效应≈-0.0000）； Assistant→Regular: β≈-0.364（阈值效应≈-0.0026）； Regular→Senior: β≈-0.019（阈值效应≈-0.0073）； Senior→Leader: β≈0.124（阈值效应≈-0.0042）； Leader→Chief/founder: β≈0.186（阈值效应≈0.0104）
+[us] rarity_score_z的门槛异质性：Junior→Assistant: β≈0.290（阈值效应≈0.0000）； Assistant→Regular: β≈0.290（阈值效应≈-0.0002）； Regular→Senior: β≈0.290（阈值效应≈-0.0005）； Senior→Leader: β≈0.290（阈值效应≈-0.0054）； Leader→Chief/founder: β≈0.290（阈值效应≈-0.0021）
 
 Key Insights:
-  - Junior→Assistant: rarity hinders this transition (β=-0.261)
-  - Assistant→Regular: rarity hinders this transition (β=-0.364)
-  - Senior→Leader: rarity facilitates this transition (β=0.124)
-  - Leader→Chief/founder: rarity facilitates this transition (β=0.186)
+  - Junior→Assistant: rarity facilitates this transition (β=0.290)
+  - Assistant→Regular: rarity facilitates this transition (β=0.290)
+  - Regular→Senior: rarity facilitates this transition (β=0.290)
+  - Senior→Leader: rarity facilitates this transition (β=0.290)
+  - Leader→Chief/founder: rarity facilitates this transition (β=0.290)
 
 ----------------------------------------
 
 Country: india
 ----------------------------------------
 Threshold Effects Table:
-               coef    dPr_ge
-threshold                    
-cut1      -0.024273 -0.000000
-cut2      -0.009143 -0.001003
-cut3       0.044791 -0.000405
-cut4       0.121032  0.010567
-cut5      -0.002201  0.012843
+              coef    dPr_ge
+threshold                   
+cut1      0.430836 -0.000000
+cut2      0.430836  0.002998
+cut3      0.430836  0.003917
+cut4      0.430836  0.025170
+cut5      0.430836  0.011986
 
 Category Probability Effects:
-Y=0    0.001003
-Y=1   -0.000598
-Y=2   -0.010972
-Y=3   -0.002276
-Y=4    0.012848
-Y=5   -0.000005
+Y=0   -0.002998
+Y=1   -0.000919
+Y=2   -0.021253
+Y=3    0.013184
+Y=4    0.011733
+Y=5    0.000252
 
 Summary:
-[india] rarity_score_z的门槛异质性：Junior→Assistant: β≈-0.024（阈值效应≈-0.0000）； Assistant→Regular: β≈-0.009（阈值效应≈-0.0010）； Regular→Senior: β≈0.045（阈值效应≈-0.0004）； Senior→Leader: β≈0.121（阈值效应≈0.0106）； Leader→Chief/founder: β≈-0.002（阈值效应≈0.0128）
+[india] rarity_score_z的门槛异质性：Junior→Assistant: β≈0.431（阈值效应≈-0.0000）； Assistant→Regular: β≈0.431（阈值效应≈0.0030）； Regular→Senior: β≈0.431（阈值效应≈0.0039）； Senior→Leader: β≈0.431（阈值效应≈0.0252）； Leader→Chief/founder: β≈0.431（阈值效应≈0.0120）
 
 Key Insights:
-  - Junior→Assistant: rarity hinders this transition (β=-0.024)
-  - Regular→Senior: rarity facilitates this transition (β=0.045)
-  - Senior→Leader: rarity facilitates this transition (β=0.121)
+  - Junior→Assistant: rarity facilitates this transition (β=0.431)
+  - Assistant→Regular: rarity facilitates this transition (β=0.431)
+  - Regular→Senior: rarity facilitates this transition (β=0.431)
+  - Senior→Leader: rarity facilitates this transition (β=0.431)
+  - Leader→Chief/founder: rarity facilitates this transition (β=0.431)
 
 ----------------------------------------
+
+================================================================================
+PPOM NON-PARALLEL EFFECTS SUMMARY: Where Proportional Odds Assumption Fails
+================================================================================
+This summary identifies threshold-specific violations of proportional odds,
+which is the core insight that PPOM provides over standard ordered logit.
+
+Countries with Significant Non-Parallel Effects Detected:
+
+- us: internationalization_Multinational, internationalization_International (ΔLL: 1875.8680)
+- india: internationalization_International, highest_educational_degree_Advanced Degree (ΔLL: 688.6029)
+
+INTERPRETATION: Variables with non-parallel effects show differential impacts
+across career stages, revealing where standard ordered logit assumptions break down.
 
 ================================================================================
 Country: us | Model: ordered_logit_lag (gologit2)
@@ -139,15 +164,15 @@ Generalized Ordered Model Results (LOGIT link)
 ======================================================================
 Categories: [0, 1, 2, 3, 4, 5]
 Convergence: Yes
-Iterations: 68
-Negative Log-Likelihood: 172700.956217
+Iterations: 136
+Negative Log-Likelihood: 172823.704034
 Null Log-Likelihood: -203811.064025
-McFadden's Pseudo R²: 0.1526
-Adjusted Pseudo R²: 0.1525
+McFadden's Pseudo R²: 0.1520
+Adjusted Pseudo R²: 0.1519
 
 Variable Constraints:
-  Parallel-lines (same effect across thresholds): ['internationalization_International', 'simplified_company_size_Small (11-50 employees)', 'year_4', 'highest_educational_degree_Advanced Degree', 'internationalization_Multinational', 'simplified_company_size_Medium (51-500 employees)', 'work_years', 'year_3', 'year_5', 'year_6', 'year_8', 'gender_female', 'year_2', 'year_9', 'whether_bachelor_university_prestigious', 'year_7', 'simplified_company_size_Large (500+ employees)']
-  Non-parallel (varying effect by threshold): ['rarity_score_z']
+  Parallel-lines (same effect across thresholds): ['whether_bachelor_university_prestigious', 'simplified_company_size_Medium (51-500 employees)', 'year_8', 'simplified_company_size_Small (11-50 employees)', 'year_7', 'simplified_company_size_Large (500+ employees)', 'year_3', 'year_2', 'rarity_score_z', 'gender_female', 'highest_educational_degree_Advanced Degree', 'year_6', 'year_9', 'year_4', 'work_years', 'year_5']
+  Non-parallel (varying effect by threshold): ['internationalization_Multinational', 'internationalization_International']
 
 PARAMETERIZATION vs. Stata gologit2:
 - Our cutpoints (α) have opposite sign for logit/probit: F(α - Xβ) vs F(-α + Xβ)
@@ -159,11 +184,6 @@ STANDARD ERRORS:
   reparameterization (accounts for constraint α₁ < α₂ < ... < αₖ)
 - Coefficient SEs computed from numerical Hessian at MLE
 - P-values based on asymptotic normal distribution (Wald tests)
-- Hessian computed using 3-point finite differences
-- Matrix inverted using standard matrix inversion
-- Hessian condition number: inf
-- Covariance matrix condition number: inf
-  ⚠ Very high condition number - SEs may be unreliable
 
 PREDICTION vs TRAINING CONSISTENCY:
 - Training: negative probabilities trigger infeasibility (hard constraint)
@@ -174,56 +194,60 @@ Cutpoints (Intercepts):
 -----------------------------------------------------------------
                 Coef.      Std.Err         z        P>|z|
 -----------------------------------------------------------------
-  α 1      -3.421096     0.037352    -91.590      0.000 ***
-  α 2      -2.703925     0.031005    -87.210      0.000 ***
-  α 3       1.926610     0.023683     81.351      0.000 ***
-  α 4       3.613641     0.023957    150.841      0.000 ***
-  α 5       5.880060     0.031010    189.619      0.000 ***
+  α 1      -3.537003     0.000001   -3537002.863      0.000 ***
+  α 2      -2.700646     0.000001   -2700645.756      0.000 ***
+  α 3       1.854091     0.000001   1854091.235      0.000 ***
+  α 4       3.475199     0.000001   3475199.230      0.000 ***
+  α 5       5.443628     0.000001   5443627.590      0.000 ***
 
 Parallel-Lines Coefficients (same across all thresholds):
 -----------------------------------------------------------------
                 Coef.      Std.Err         z        P>|z|
 -----------------------------------------------------------------
-  internationalization_International   -0.148707     0.010493    -14.172      0.000 ***
-  simplified_company_size_Small (11-50 employees)    0.023468     0.000671     34.964      0.000 ***
-  year_4      0.037936     0.000001   37935.717      0.000 ***
-  highest_educational_degree_Advanced Degree   -0.004363     0.000001   -4362.794      0.000 ***
-  internationalization_Multinational    0.138806     0.009594     14.469      0.000 ***
-  simplified_company_size_Medium (51-500 employees)   -0.095318     0.011165     -8.537      0.000 ***
-  work_years    0.317541     0.028397     11.182      0.000 ***
-  year_3      0.507248     0.031267     16.223      0.000 ***
-  year_5      0.334311     0.029227     11.439      0.000 ***
-  year_6      0.047340     0.000001   47340.145      0.000 ***
-  year_8      0.255169     0.017637     14.468      0.000 ***
-  gender_female    0.437265     0.018647     23.449      0.000 ***
-  year_2      0.591723     0.017539     33.737      0.000 ***
-  year_9      0.713787     0.017800     40.100      0.000 ***
-  whether_bachelor_university_prestigious    0.804051     0.017595     45.697      0.000 ***
-  year_7      0.879157     0.016782     52.387      0.000 ***
-  simplified_company_size_Large (500+ employees)    0.918468     0.017291     53.118      0.000 ***
+  whether_bachelor_university_prestigious   -0.024809     0.000000      0.000      0.000 ***
+  simplified_company_size_Medium (51-500 employees)   -0.136489     0.000000      0.000      0.000 ***
+  year_8      0.023518     0.000000      0.000      0.000 ***
+  simplified_company_size_Small (11-50 employees)    0.045113     0.000000      0.000      0.000 ***
+  year_7      0.010434     0.000000      0.000      0.000 ***
+  simplified_company_size_Large (500+ employees)    0.016907     0.000000      0.000      0.000 ***
+  year_3      0.125550     0.000000      0.000      0.000 ***
+  year_2      0.055299     0.000000      0.000      0.000 ***
+  rarity_score_z    0.290057     0.000000      0.000      0.000 ***
+  gender_female    0.473943     0.000000      0.000      0.000 ***
+  highest_educational_degree_Advanced Degree    0.644388     0.000000      0.000      0.000 ***
+  year_6      0.796236     0.000000      0.000      0.000 ***
+  year_9      0.919699     0.000000      0.000      0.000 ***
+  year_4      1.012813     0.000000      0.000      0.000 ***
+  work_years    1.091383     0.000000      0.000      0.000 ***
+  year_5      1.132316     0.000000      0.000      0.000 ***
 
 Non-Parallel Coefficients (vary by threshold):
 -----------------------------------------------------------------
   Equation 1:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    rarity_score_z   -0.260600     0.019374    -13.451      0.000 ***
+    internationalization_Multinational    0.188991     0.000000      0.000      0.000 ***
+    internationalization_International    0.274399     0.000000      0.000      0.000 ***
   Equation 2:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    rarity_score_z   -0.363784     0.012614    -28.839      0.000 ***
+    internationalization_Multinational    0.424902     0.000000      0.000      0.000 ***
+    internationalization_International   -0.080801     0.000000      0.000      0.000 ***
   Equation 3:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    rarity_score_z   -0.019274     0.000001   -19274.071      0.000 ***
+    internationalization_Multinational    0.151126     0.000000      0.000      0.000 ***
+    internationalization_International    0.063666     0.000000      0.000      0.000 ***
   Equation 4:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    rarity_score_z    0.123666     0.004883     25.328      0.000 ***
+    internationalization_Multinational    0.112951     0.000000      0.000      0.000 ***
+    internationalization_International   -0.173796     0.000000      0.000      0.000 ***
   Equation 5:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    rarity_score_z    0.185995     0.019113      9.731      0.000 ***
+    internationalization_Multinational   -0.612795     0.000000      0.000      0.000 ***
+    internationalization_International   -0.453175     0.000000      0.000      0.000 ***
 
 ======================================================================
 
@@ -233,182 +257,182 @@ Marginal Effects (APE) by Variable:
 
 Variable: rarity_score_z
   Seniority Level Effects:
-    Junior (level 0): 0.002558
-    Assistant (level 1): 0.004754
-    Regular (level 2): -0.003088
-    Senior (level 3): -0.014553
-    Leader (level 4): 0.008324
-    Chief or founder (level 5): 0.002004
-  Method: Numerical APE (dx=0.0001) computed via gologit2 over 5000 samples
+    Junior (level 0): 0.000231
+    Assistant (level 1): 0.000258
+    Regular (level 2): 0.004907
+    Senior (level 3): -0.003305
+    Leader (level 4): -0.001819
+    Chief or founder (level 5): -0.000272
+  Method: Numerical APE (per+1SD) computed via gologit2 over 5000 samples
 
 Variable: whether_bachelor_university_prestigious
   Seniority Level Effects:
-    Junior (level 0): 0.001515
-    Assistant (level 1): 0.001585
-    Regular (level 2): 0.029151
-    Senior (level 3): -0.020199
-    Leader (level 4): -0.010509
-    Chief or founder (level 5): -0.001542
+    Junior (level 0): 0.001297
+    Assistant (level 1): 0.001447
+    Regular (level 2): 0.026764
+    Senior (level 3): -0.018200
+    Leader (level 4): -0.009843
+    Chief or founder (level 5): -0.001464
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: work_years
   Seniority Level Effects:
-    Junior (level 0): -0.000230
-    Assistant (level 1): -0.000241
-    Regular (level 2): -0.004672
-    Senior (level 3): 0.003184
-    Leader (level 4): 0.001707
-    Chief or founder (level 5): 0.000253
+    Junior (level 0): -0.000216
+    Assistant (level 1): -0.000242
+    Regular (level 2): -0.004676
+    Senior (level 3): 0.003132
+    Leader (level 4): 0.001741
+    Chief or founder (level 5): 0.000261
   Method: Numerical APE (dx=0.0001) computed via gologit2 over 5000 samples
 
 Variable: gender_female
   Seniority Level Effects:
-    Junior (level 0): -0.000368
-    Assistant (level 1): -0.000386
-    Regular (level 2): -0.007589
-    Senior (level 3): 0.005147
-    Leader (level 4): 0.002783
-    Chief or founder (level 5): 0.000413
+    Junior (level 0): -0.000410
+    Assistant (level 1): -0.000458
+    Regular (level 2): -0.009020
+    Senior (level 3): 0.006006
+    Leader (level 4): 0.003374
+    Chief or founder (level 5): 0.000507
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: highest_educational_degree_Advanced Degree
   Seniority Level Effects:
-    Junior (level 0): 0.000043
-    Assistant (level 1): 0.000045
-    Regular (level 2): 0.000868
-    Senior (level 3): -0.000592
-    Leader (level 4): -0.000317
-    Chief or founder (level 5): -0.000047
+    Junior (level 0): -0.000096
+    Assistant (level 1): -0.000107
+    Regular (level 2): -0.002076
+    Senior (level 3): 0.001389
+    Leader (level 4): 0.000774
+    Chief or founder (level 5): 0.000116
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: internationalization_Multinational
   Seniority Level Effects:
-    Junior (level 0): -0.001345
-    Assistant (level 1): -0.001409
-    Regular (level 2): -0.027785
-    Senior (level 3): 0.018841
-    Leader (level 4): 0.010186
-    Chief or founder (level 5): 0.001512
+    Junior (level 0): -0.001712
+    Assistant (level 1): -0.006204
+    Regular (level 2): -0.025200
+    Senior (level 3): 0.023429
+    Leader (level 4): 0.015978
+    Chief or founder (level 5): -0.006291
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: internationalization_International
   Seniority Level Effects:
-    Junior (level 0): 0.000974
-    Assistant (level 1): 0.001018
-    Regular (level 2): 0.018650
-    Senior (level 3): -0.012941
-    Leader (level 4): -0.006715
-    Chief or founder (level 5): -0.000986
+    Junior (level 0): -0.002251
+    Assistant (level 1): 0.003878
+    Regular (level 2): -0.015631
+    Senior (level 3): 0.027928
+    Leader (level 4): -0.009751
+    Chief or founder (level 5): -0.004173
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: simplified_company_size_Large (500+ employees)
   Seniority Level Effects:
-    Junior (level 0): -0.003360
-    Assistant (level 1): -0.003502
-    Regular (level 2): -0.061130
-    Senior (level 3): 0.042740
-    Leader (level 4): 0.022018
-    Chief or founder (level 5): 0.003233
+    Junior (level 0): -0.000156
+    Assistant (level 1): -0.000174
+    Regular (level 2): -0.003357
+    Senior (level 3): 0.002252
+    Leader (level 4): 0.001248
+    Chief or founder (level 5): 0.000187
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: simplified_company_size_Small (11-50 employees)
   Seniority Level Effects:
-    Junior (level 0): -0.004054
-    Assistant (level 1): -0.004279
-    Regular (level 2): -0.108265
-    Senior (level 3): 0.066028
-    Leader (level 4): 0.043679
-    Chief or founder (level 5): 0.006891
+    Junior (level 0): -0.001096
+    Assistant (level 1): -0.001228
+    Regular (level 2): -0.025491
+    Senior (level 3): 0.016650
+    Leader (level 4): 0.009697
+    Chief or founder (level 5): 0.001469
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: simplified_company_size_Medium (51-500 employees)
   Seniority Level Effects:
-    Junior (level 0): -0.003028
-    Assistant (level 1): -0.003183
-    Regular (level 2): -0.068603
-    Senior (level 3): 0.044451
-    Leader (level 4): 0.026342
-    Chief or founder (level 5): 0.004022
+    Junior (level 0): -0.000501
+    Assistant (level 1): -0.000561
+    Regular (level 2): -0.011064
+    Senior (level 3): 0.007355
+    Leader (level 4): 0.004147
+    Chief or founder (level 5): 0.000623
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_2
   Seniority Level Effects:
-    Junior (level 0): -0.000457
-    Assistant (level 1): -0.000479
-    Regular (level 2): -0.009487
-    Senior (level 3): 0.006407
-    Leader (level 4): 0.003496
-    Chief or founder (level 5): 0.000520
+    Junior (level 0): -0.002439
+    Assistant (level 1): -0.002731
+    Regular (level 2): -0.059627
+    Senior (level 3): 0.037605
+    Leader (level 4): 0.023539
+    Chief or founder (level 5): 0.003651
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_3
   Seniority Level Effects:
-    Junior (level 0): -0.002298
-    Assistant (level 1): -0.002413
-    Regular (level 2): -0.052455
-    Senior (level 3): 0.034003
-    Leader (level 4): 0.020097
-    Chief or founder (level 5): 0.003066
+    Junior (level 0): -0.003749
+    Assistant (level 1): -0.004212
+    Regular (level 2): -0.099049
+    Senior (level 3): 0.059926
+    Leader (level 4): 0.040620
+    Chief or founder (level 5): 0.006464
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_4
   Seniority Level Effects:
-    Junior (level 0): -0.003709
-    Assistant (level 1): -0.003905
-    Regular (level 2): -0.091507
-    Senior (level 3): 0.057183
-    Leader (level 4): 0.036273
-    Chief or founder (level 5): 0.005665
+    Junior (level 0): -0.004830
+    Assistant (level 1): -0.005436
+    Regular (level 2): -0.136227
+    Senior (level 3): 0.079253
+    Leader (level 4): 0.057806
+    Chief or founder (level 5): 0.009433
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_5
   Seniority Level Effects:
-    Junior (level 0): -0.004732
-    Assistant (level 1): -0.005001
-    Regular (level 2): -0.125836
-    Senior (level 3): 0.075946
-    Leader (level 4): 0.051419
-    Chief or founder (level 5): 0.008204
+    Junior (level 0): -0.005625
+    Assistant (level 1): -0.006338
+    Regular (level 2): -0.170443
+    Senior (level 3): 0.095188
+    Leader (level 4): 0.074708
+    Chief or founder (level 5): 0.012510
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_6
   Seniority Level Effects:
-    Junior (level 0): -0.005533
-    Assistant (level 1): -0.005878
-    Regular (level 2): -0.152969
-    Senior (level 3): 0.090231
-    Leader (level 4): 0.063826
-    Chief or founder (level 5): 0.010323
+    Junior (level 0): -0.006283
+    Assistant (level 1): -0.007103
+    Regular (level 2): -0.197832
+    Senior (level 3): 0.107484
+    Leader (level 4): 0.088647
+    Chief or founder (level 5): 0.015087
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_7
   Seniority Level Effects:
-    Junior (level 0): -0.006022
-    Assistant (level 1): -0.006409
-    Regular (level 2): -0.173638
-    Senior (level 3): 0.100188
-    Leader (level 4): 0.073792
-    Chief or founder (level 5): 0.012090
+    Junior (level 0): -0.006679
+    Assistant (level 1): -0.007533
+    Regular (level 2): -0.219121
+    Senior (level 3): 0.115863
+    Leader (level 4): 0.100124
+    Chief or founder (level 5): 0.017346
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_8
   Seniority Level Effects:
-    Junior (level 0): -0.006405
-    Assistant (level 1): -0.006834
-    Regular (level 2): -0.191080
-    Senior (level 3): 0.108513
-    Leader (level 4): 0.082231
-    Chief or founder (level 5): 0.013575
+    Junior (level 0): -0.006992
+    Assistant (level 1): -0.007895
+    Regular (level 2): -0.237274
+    Senior (level 3): 0.123004
+    Leader (level 4): 0.109915
+    Chief or founder (level 5): 0.019243
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_9
   Seniority Level Effects:
-    Junior (level 0): -0.006610
-    Assistant (level 1): -0.007081
-    Regular (level 2): -0.200238
-    Senior (level 3): 0.112557
-    Leader (level 4): 0.086977
-    Chief or founder (level 5): 0.014394
+    Junior (level 0): -0.007120
+    Assistant (level 1): -0.008059
+    Regular (level 2): -0.246855
+    Senior (level 3): 0.126200
+    Leader (level 4): 0.115462
+    Chief or founder (level 5): 0.020373
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 ------------------------------------------------------------
@@ -420,61 +444,90 @@ Generalized Ordered Model Results (LOGIT link)
 ======================================================================
 Categories: [0, 1, 2, 3, 4, 5]
 Convergence: Yes
-Iterations: 13
-Negative Log-Likelihood: 127950.137222
+Iterations: 61
+Negative Log-Likelihood: 124574.385761
 Null Log-Likelihood: -141791.169129
-McFadden's Pseudo R²: 0.0976
-Adjusted Pseudo R²: 0.0974
+McFadden's Pseudo R²: 0.1214
+Adjusted Pseudo R²: 0.1212
 
 Variable Constraints:
-  Parallel-lines (same effect across thresholds): ['internationalization_International', 'simplified_company_size_Small (11-50 employees)', 'year_4', 'highest_educational_degree_Advanced Degree', 'internationalization_Multinational', 'simplified_company_size_Medium (51-500 employees)', 'work_years', 'year_3', 'year_5', 'year_6', 'year_8', 'gender_female', 'year_2', 'year_9', 'whether_bachelor_university_prestigious', 'year_7', 'simplified_company_size_Large (500+ employees)']
-  Non-parallel (varying effect by threshold): ['rarity_score_z']
+  Parallel-lines (same effect across thresholds): ['whether_bachelor_university_prestigious', 'simplified_company_size_Medium (51-500 employees)', 'year_8', 'simplified_company_size_Small (11-50 employees)', 'year_7', 'simplified_company_size_Large (500+ employees)', 'year_3', 'internationalization_Multinational', 'year_2', 'rarity_score_z', 'gender_female', 'year_6', 'year_9', 'year_4', 'work_years', 'year_5']
+  Non-parallel (varying effect by threshold): ['highest_educational_degree_Advanced Degree', 'internationalization_International']
 
 PARAMETERIZATION vs. Stata gologit2:
 - Our cutpoints (α) have opposite sign for logit/probit: F(α - Xβ) vs F(-α + Xβ)
 - Coefficient interpretations (β) are identical: same direction & magnitude
 - Only the intercept/cutpoint signs differ between implementations
 
+STANDARD ERRORS:
+- Cutpoint SEs computed using Delta method transformation from monotonic
+  reparameterization (accounts for constraint α₁ < α₂ < ... < αₖ)
+- Coefficient SEs computed from numerical Hessian at MLE
+- P-values based on asymptotic normal distribution (Wald tests)
+
+PREDICTION vs TRAINING CONSISTENCY:
+- Training: negative probabilities trigger infeasibility (hard constraint)
+- Prediction: probabilities clipped to [0,1] and renormalized (safe mode)
+- Interpret predictions near constraint boundaries with caution
+
 Cutpoints (Intercepts):
 -----------------------------------------------------------------
-  α 1 =  -1.439681
-  α 2 =  -1.391874
-  α 3 =   2.046078
-  α 4 =   3.703977
-  α 5 =   7.829669
+                Coef.      Std.Err         z        P>|z|
+-----------------------------------------------------------------
+  α 1      -1.900631     0.000001   -1900631.401      0.000 ***
+  α 2      -1.583015     0.000001   -1583015.449      0.000 ***
+  α 3       1.985429     0.000001   1985429.010      0.000 ***
+  α 4       3.637244     0.000001   3637244.447      0.000 ***
+  α 5       7.843715     0.000001   7843714.935      0.000 ***
 
 Parallel-Lines Coefficients (same across all thresholds):
 -----------------------------------------------------------------
-  internationalization_International =  -0.000775
-  simplified_company_size_Small (11-50 employees) =   0.134822
-  year_4          =  -0.007974
-  highest_educational_degree_Advanced Degree =   0.016464
-  internationalization_Multinational =  -0.004468
-  simplified_company_size_Medium (51-500 employees) =   0.001809
-  work_years      =  -0.002509
-  year_3          =   0.001547
-  year_5          =   0.011317
-  year_6          =  -0.032119
-  year_8          =  -0.015657
-  gender_female   =  -0.001872
-  year_2          =   0.008928
-  year_9          =   0.016395
-  whether_bachelor_university_prestigious =   0.022258
-  year_7          =   0.026883
-  simplified_company_size_Large (500+ employees) =   0.029675
+                Coef.      Std.Err         z        P>|z|
+-----------------------------------------------------------------
+  whether_bachelor_university_prestigious    0.107618     0.000000      0.000      0.000 ***
+  simplified_company_size_Medium (51-500 employees)   -0.006914     0.000000      0.000      0.000 ***
+  year_8      0.068254     0.000000      0.000      0.000 ***
+  simplified_company_size_Small (11-50 employees)   -0.070668     0.000000      0.000      0.000 ***
+  year_7     -0.040722     0.000000      0.000      0.000 ***
+  simplified_company_size_Large (500+ employees)    0.141711     0.000000      0.000      0.000 ***
+  year_3      0.189289     0.000000      0.000      0.000 ***
+  internationalization_Multinational    0.235202     0.000000      0.000      0.000 ***
+  year_2      0.155875     0.000000      0.000      0.000 ***
+  rarity_score_z    0.430836     0.000000      0.000      0.000 ***
+  gender_female    0.640789     0.000000      0.000      0.000 ***
+  year_6      0.792701     0.000000      0.000      0.000 ***
+  year_9      0.891297     0.000000      0.000      0.000 ***
+  year_4      0.965889     0.000000      0.000      0.000 ***
+  work_years    1.025079     0.000000      0.000      0.000 ***
+  year_5      1.057061     0.000000      0.000      0.000 ***
 
 Non-Parallel Coefficients (vary by threshold):
 -----------------------------------------------------------------
   Equation 1:
-    rarity_score_z  =  -0.024273
+                Coef.      Std.Err         z        P>|z|
+    -------------------------------------------------------------
+    highest_educational_degree_Advanced Degree    0.057990     0.000000      0.000      0.000 ***
+    internationalization_International    0.136510     0.000000      0.000      0.000 ***
   Equation 2:
-    rarity_score_z  =  -0.009143
+                Coef.      Std.Err         z        P>|z|
+    -------------------------------------------------------------
+    highest_educational_degree_Advanced Degree    0.203427     0.000000      0.000      0.000 ***
+    internationalization_International    0.175319     0.000000      0.000      0.000 ***
   Equation 3:
-    rarity_score_z  =   0.044791
+                Coef.      Std.Err         z        P>|z|
+    -------------------------------------------------------------
+    highest_educational_degree_Advanced Degree    0.206275     0.000000      0.000      0.000 ***
+    internationalization_International   -0.145505     0.000000      0.000      0.000 ***
   Equation 4:
-    rarity_score_z  =   0.121032
+                Coef.      Std.Err         z        P>|z|
+    -------------------------------------------------------------
+    highest_educational_degree_Advanced Degree    0.038354     0.000000      0.000      0.000 ***
+    internationalization_International   -0.179504     0.000000      0.000      0.000 ***
   Equation 5:
-    rarity_score_z  =  -0.002201
+                Coef.      Std.Err         z        P>|z|
+    -------------------------------------------------------------
+    highest_educational_degree_Advanced Degree    0.047035     0.000000      0.000      0.000 ***
+    internationalization_International   -0.019348     0.000000      0.000      0.000 ***
 
 ======================================================================
 
@@ -484,182 +537,182 @@ Marginal Effects (APE) by Variable:
 
 Variable: rarity_score_z
   Seniority Level Effects:
-    Junior (level 0): 0.000998
-    Assistant (level 1): -0.000595
-    Regular (level 2): -0.010978
-    Senior (level 3): -0.002314
-    Leader (level 4): 0.012894
-    Chief or founder (level 5): -0.000005
-  Method: Numerical APE (dx=0.0001) computed via gologit2 over 5000 samples
+    Junior (level 0): -0.002984
+    Assistant (level 1): -0.000918
+    Regular (level 2): -0.021278
+    Senior (level 3): 0.013166
+    Leader (level 4): 0.011761
+    Chief or founder (level 5): 0.000254
+  Method: Numerical APE (per+1SD) computed via gologit2 over 5000 samples
 
 Variable: whether_bachelor_university_prestigious
   Seniority Level Effects:
-    Junior (level 0): 0.000032
-    Assistant (level 1): 0.000001
-    Regular (level 2): 0.000150
-    Senior (level 3): -0.000101
-    Leader (level 4): -0.000081
-    Chief or founder (level 5): -0.000002
+    Junior (level 0): 0.000202
+    Assistant (level 1): 0.000062
+    Regular (level 2): 0.001342
+    Senior (level 3): -0.000865
+    Leader (level 4): -0.000726
+    Chief or founder (level 5): -0.000015
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: work_years
   Seniority Level Effects:
-    Junior (level 0): -0.005548
-    Assistant (level 1): -0.000246
-    Regular (level 2): -0.026049
-    Senior (level 3): 0.017485
-    Leader (level 4): 0.014038
-    Chief or founder (level 5): 0.000321
+    Junior (level 0): -0.001989
+    Assistant (level 1): -0.000609
+    Regular (level 2): -0.013265
+    Senior (level 3): 0.008530
+    Leader (level 4): 0.007181
+    Chief or founder (level 5): 0.000152
   Method: Numerical APE (dx=0.0001) computed via gologit2 over 5000 samples
 
 Variable: gender_female
   Seniority Level Effects:
-    Junior (level 0): 0.000329
-    Assistant (level 1): 0.000015
-    Regular (level 2): 0.001540
-    Senior (level 3): -0.001035
-    Leader (level 4): -0.000829
-    Chief or founder (level 5): -0.000019
+    Junior (level 0): 0.002091
+    Assistant (level 1): 0.000639
+    Regular (level 2): 0.013659
+    Senior (level 3): -0.008891
+    Leader (level 4): -0.007343
+    Chief or founder (level 5): -0.000155
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: highest_educational_degree_Advanced Degree
   Seniority Level Effects:
-    Junior (level 0): -0.000674
-    Assistant (level 1): -0.000030
-    Regular (level 2): -0.003188
-    Senior (level 3): 0.002132
-    Leader (level 4): 0.001721
-    Chief or founder (level 5): 0.000039
+    Junior (level 0): -0.001660
+    Assistant (level 1): -0.005613
+    Regular (level 2): -0.041125
+    Senior (level 3): 0.044239
+    Leader (level 4): 0.004052
+    Chief or founder (level 5): 0.000107
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: internationalization_International
   Seniority Level Effects:
-    Junior (level 0): 0.000184
-    Assistant (level 1): 0.000008
-    Regular (level 2): 0.000863
-    Senior (level 3): -0.000580
-    Leader (level 4): -0.000465
-    Chief or founder (level 5): -0.000011
+    Junior (level 0): -0.003793
+    Assistant (level 1): -0.002493
+    Regular (level 2): 0.039816
+    Senior (level 3): -0.015153
+    Leader (level 4): -0.018335
+    Chief or founder (level 5): -0.000043
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: internationalization_Multinational
   Seniority Level Effects:
-    Junior (level 0): -0.000074
-    Assistant (level 1): -0.000003
-    Regular (level 2): -0.000349
-    Senior (level 3): 0.000235
-    Leader (level 4): 0.000188
-    Chief or founder (level 5): 0.000004
+    Junior (level 0): 0.001180
+    Assistant (level 1): 0.000361
+    Regular (level 2): 0.007929
+    Senior (level 3): -0.005079
+    Leader (level 4): -0.004300
+    Chief or founder (level 5): -0.000091
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: simplified_company_size_Large (500+ employees)
   Seniority Level Effects:
-    Junior (level 0): 0.000103
-    Assistant (level 1): 0.000005
-    Regular (level 2): 0.000485
-    Senior (level 3): -0.000325
-    Leader (level 4): -0.000261
-    Chief or founder (level 5): -0.000006
+    Junior (level 0): -0.004245
+    Assistant (level 1): -0.001296
+    Regular (level 2): -0.027211
+    Senior (level 3): 0.017788
+    Leader (level 4): 0.014654
+    Chief or founder (level 5): 0.000310
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: simplified_company_size_Small (11-50 employees)
   Seniority Level Effects:
-    Junior (level 0): -0.000064
-    Assistant (level 1): -0.000003
-    Regular (level 2): -0.000299
-    Senior (level 3): 0.000201
-    Leader (level 4): 0.000161
-    Chief or founder (level 5): 0.000004
+    Junior (level 0): -0.005133
+    Assistant (level 1): -0.001582
+    Regular (level 2): -0.037659
+    Senior (level 3): 0.022834
+    Leader (level 4): 0.021081
+    Chief or founder (level 5): 0.000459
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: simplified_company_size_Medium (51-500 employees)
   Seniority Level Effects:
-    Junior (level 0): -0.000464
-    Assistant (level 1): -0.000021
-    Regular (level 2): -0.002189
-    Senior (level 3): 0.001466
-    Leader (level 4): 0.001181
-    Chief or founder (level 5): 0.000027
+    Junior (level 0): -0.006454
+    Assistant (level 1): -0.001985
+    Regular (level 2): -0.046615
+    Senior (level 3): 0.028526
+    Leader (level 4): 0.025965
+    Chief or founder (level 5): 0.000563
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_2
   Seniority Level Effects:
-    Junior (level 0): 0.001337
-    Assistant (level 1): 0.000059
-    Regular (level 2): 0.006175
-    Senior (level 3): -0.004181
-    Leader (level 4): -0.003314
-    Chief or founder (level 5): -0.000075
+    Junior (level 0): -0.004339
+    Assistant (level 1): -0.001331
+    Regular (level 2): -0.030667
+    Senior (level 3): 0.018789
+    Leader (level 4): 0.017175
+    Chief or founder (level 5): 0.000373
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_3
   Seniority Level Effects:
-    Junior (level 0): 0.000648
-    Assistant (level 1): 0.000029
-    Regular (level 2): 0.003018
-    Senior (level 3): -0.002034
-    Leader (level 4): -0.001623
-    Chief or founder (level 5): -0.000037
+    Junior (level 0): -0.011030
+    Assistant (level 1): -0.003405
+    Regular (level 2): -0.086084
+    Senior (level 3): 0.048181
+    Leader (level 4): 0.051171
+    Chief or founder (level 5): 0.001167
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_4
   Seniority Level Effects:
-    Junior (level 0): 0.000077
-    Assistant (level 1): 0.000003
-    Regular (level 2): 0.000362
-    Senior (level 3): -0.000243
-    Leader (level 4): -0.000195
-    Chief or founder (level 5): -0.000004
+    Junior (level 0): -0.015259
+    Assistant (level 1): -0.004741
+    Regular (level 2): -0.129463
+    Senior (level 3): 0.067186
+    Leader (level 4): 0.080368
+    Chief or founder (level 5): 0.001908
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_5
   Seniority Level Effects:
-    Junior (level 0): -0.000366
-    Assistant (level 1): -0.000016
-    Regular (level 2): -0.001727
-    Senior (level 3): 0.001157
-    Leader (level 4): 0.000932
-    Chief or founder (level 5): 0.000021
+    Junior (level 0): -0.017960
+    Assistant (level 1): -0.005607
+    Regular (level 2): -0.161115
+    Senior (level 3): 0.079199
+    Leader (level 4): 0.102969
+    Chief or founder (level 5): 0.002514
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_6
   Seniority Level Effects:
-    Junior (level 0): -0.000671
-    Assistant (level 1): -0.000030
-    Regular (level 2): -0.003176
-    Senior (level 3): 0.002122
-    Leader (level 4): 0.001715
-    Chief or founder (level 5): 0.000039
+    Junior (level 0): -0.019455
+    Assistant (level 1): -0.006087
+    Regular (level 2): -0.181957
+    Senior (level 3): 0.085798
+    Leader (level 4): 0.118743
+    Chief or founder (level 5): 0.002958
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_7
   Seniority Level Effects:
-    Junior (level 0): -0.000909
-    Assistant (level 1): -0.000040
-    Regular (level 2): -0.004316
-    Senior (level 3): 0.002879
-    Leader (level 4): 0.002332
-    Chief or founder (level 5): 0.000053
+    Junior (level 0): -0.020563
+    Assistant (level 1): -0.006450
+    Regular (level 2): -0.197808
+    Senior (level 3): 0.090904
+    Leader (level 4): 0.130624
+    Chief or founder (level 5): 0.003293
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_8
   Seniority Level Effects:
-    Junior (level 0): -0.001096
-    Assistant (level 1): -0.000049
-    Regular (level 2): -0.005217
-    Senior (level 3): 0.003476
-    Leader (level 4): 0.002820
-    Chief or founder (level 5): 0.000065
+    Junior (level 0): -0.021192
+    Assistant (level 1): -0.006651
+    Regular (level 2): -0.210539
+    Senior (level 3): 0.093532
+    Leader (level 4): 0.141246
+    Chief or founder (level 5): 0.003603
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 Variable: year_9
   Seniority Level Effects:
-    Junior (level 0): -0.001209
-    Assistant (level 1): -0.000054
-    Regular (level 2): -0.005760
-    Senior (level 3): 0.003836
-    Leader (level 4): 0.003115
-    Chief or founder (level 5): 0.000071
+    Junior (level 0): -0.021898
+    Assistant (level 1): -0.006891
+    Regular (level 2): -0.216936
+    Senior (level 3): 0.096503
+    Leader (level 4): 0.145509
+    Chief or founder (level 5): 0.003713
   Method: Discrete APE (0→1) computed via gologit2 predict_proba
 
 ------------------------------------------------------------

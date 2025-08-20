@@ -16,6 +16,8 @@ default_csv = os.path.join(script_dir, "final_df.csv")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--final-csv", dest="final_csv", default=default_csv, help="Path to final_df.csv")
+parser.add_argument("--bootstrap-n", dest="bootstrap_n", type=int, default=0, help="Number of bootstrap replications (0 to disable)")
+parser.add_argument("--bootstrap-cluster", dest="bootstrap_cluster", action="store_true", help="Use cluster (worker_id) bootstrap if enabled")
 args = parser.parse_args()
 
 final_df = pd.read_csv(args.final_csv)
@@ -429,6 +431,7 @@ for ctry in countries:
             mask = X_clean.notna().all(axis=1) & y_ordinal.notna()
             X_clean = X_clean.loc[mask]
             y_clean = y_ordinal.loc[mask].astype(int)
+            cluster = dfc.loc[mask, 'worker_id'].astype(str).values
             
             # 确保所有变量都是数值型（float或int）
             for col in list(X_clean.columns):
@@ -467,6 +470,7 @@ for ctry in countries:
             # 使用自定义gologit2模型
             X_final = X_clean
             feature_names = list(X_final.columns)
+            print(f"  {ctry}: feature_names来源与对齐: 使用X_final.columns (n={len(feature_names)})，与y_clean、cluster通过mask严格对齐")
             
             # === PARALLEL CONSTRAINT STRATEGY ===
             # Put most variables in parallel to reduce dimensionality and improve stability
@@ -512,90 +516,128 @@ for ctry in countries:
             print(f"  {ctry}: 强制parallel变量 (n={len(always_parallel)}): {always_parallel}")
             print(f"  {ctry}: 候选非平行变量 (n={len(candidate_npl_vars)}): {candidate_npl_vars}")
             
-            # 执行自动变量选择
-            autofit_model = GeneralizedOrderedModel(link='logit')
+            # === 快速PPOM变量选择：仅用LR检验，不算SE ===
+            print(f"  {ctry}: 开始快速PPOM选择（仅LR检验）...")
+            print(f"  {ctry}: 并行/非并行变量名单将基于feature_names与always_parallel/candidate列表，保持与模型npl_vars_一致")
             
-            selection_result = autofit_model.autofit_variable_selection(
-                X_final.values, 
-                y_clean.values,
-                feature_names=feature_names,
-                candidate_vars=candidate_npl_vars,  # 只考虑这些变量作为候选非平行
-                significance_level=0.01,  # 严格的显著性水平
-                max_npl_vars=3,  # 最多3个非平行变量，控制模型复杂度
-                verbose=True
-            )
-            
-            if selection_result['success']:
-                # 使用自动选择的结果
-                selected_npl_vars = selection_result['selected_npl_vars']
-                final_pl_vars = selection_result['final_pl_vars']
+            # 基线：全部并行
+            all_feats = feature_names
+            pl_now = list(all_feats)  # 先当作都并行
+            npl_now = []
+
+            def fit_ll(pl_vars, npl_vars):
+                """快速拟合函数：只算对数似然，不算SE"""
+                mdl = GeneralizedOrderedModel(link='logit', pl_vars=pl_vars)
+                res = mdl.fit(X_final.values, y_clean.values, feature_names=all_feats,
+                              verbose=False, maxiter=300, tol=1e-4, compute_se=False)
+                LL = -float(res.fun) if res.success else -np.inf   # res.fun 是 NLL
+                return mdl, res, LL
+
+            # 1) 基线 LL0 (全部并行)
+            print(f"  {ctry}: 计算基线模型（全并行）...")
+            _, baseline_res, LL0 = fit_ll(pl_now, npl_now)
+            if not baseline_res.success:
+                print(f"  {ctry}: 基线模型拟合失败，跳过PPOM选择")
+                pl_vars = pl_now
+                non_parallel_vars = npl_now
+                model = GeneralizedOrderedModel(link='logit', pl_vars=pl_vars)
+                res = model.fit(X_final.values, y_clean.values, feature_names=feature_names,
+                               cluster_var=cluster,
+                               verbose=False, maxiter=2000, tol=1e-5, compute_se=True)
+            else:
+                print(f"  {ctry}: 基线LL = {LL0:.4f}")
+
+                # 2) 前向逐步选择，只测试候选变量
+                cands = candidate_npl_vars[:]   # 候选非平行变量
+                alpha = 0.01
+                max_npl = 2  # 限制最多2个非平行变量，提升速度
+                improvement_log = []
+                K = len(baseline_res.alphas)
+                print(f"  {ctry}: PPOM前向选择设置: alpha={alpha}, 自由度df=K-2={K-2} (K=类别-1={K})")
                 
+                while len(npl_now) < max_npl and cands:
+                    print(f"  {ctry}: 测试候选变量: {cands}")
+                    best = None
+                    
+                    for v in cands:
+                        pl_try = [w for w in pl_now if w != v]
+                        npl_try = npl_now + [v]
+                        _, res1, LL1 = fit_ll(pl_try, npl_try)
+                        
+                        if res1.success:
+                            LR = 2*(LL1 - LL0)
+                            df = len(baseline_res.alphas) - 2  # 正确自由度：每个NPL变量从parallel(1参数)变non-parallel(K-1参数)，净增K-2参数
+                            from scipy.stats import chi2
+                            p = 1 - chi2.cdf(max(0, LR), df) if LR > 0 else 1.0
+                            
+                            print(f"  {ctry}: {v}: ΔLL={LL1-LL0:.3f}, LR={LR:.2f}, p={p:.4f}")
+                            best = max(best or (None,-1e9,1.0,None), (v, LR, p, res1), key=lambda t: t[1])
+                        else:
+                            print(f"  {ctry}: {v}: 模型拟合失败")
+                    
+                    if best and best[0] is not None:
+                        v, LR, p, _ = best
+                        if p < alpha:
+                            npl_now.append(v)
+                            pl_now.remove(v) 
+                            LL0 += LR/2  # 更新基线LL
+                            cands.remove(v)
+                            improvement_log.append((v, LR, p))
+                            print(f"  {ctry}: -> 选择 {v} (p={p:.4f}, ΔLL={LR/2:.3f})")
+                        else:
+                            print(f"  {ctry}: -> 无显著变量 (best p={p:.4f} >= {alpha})")
+                            break
+                    else:
+                        print(f"  {ctry}: -> 无可用候选变量")
+                        break
+
                 # 确保always_parallel中的变量保持parallel
-                modified_constraints = False
+                final_pl_vars = pl_now.copy()
+                final_npl_vars = npl_now.copy()
                 for var in always_parallel:
                     if var not in final_pl_vars and var in feature_names:
                         final_pl_vars.append(var)
-                        if var in selected_npl_vars:
-                            selected_npl_vars.remove(var)
-                        modified_constraints = True
-                
-                # 关键修复：如果约束被修改，需要重新拟合模型
-                if modified_constraints:
-                    print(f"  {ctry}: 强制并行约束已修改，重新拟合最终模型...")
-                    model = GeneralizedOrderedModel(link='logit', pl_vars=final_pl_vars)
-                    res = model.fit(
-                        X_final.values,
-                        y_clean.values,
-                        feature_names=feature_names,
-                        verbose=False,
-                        maxiter=2000,
-                        tol=1e-5
-                    )
-                    print(f"  {ctry}: 最终模型重拟合完成：success={res.success}")
-                else:
-                    # 约束没有被修改，使用原结果
-                    model = selection_result['final_model']
-                    res = selection_result['final_result']
-                
-                print(f"  {ctry}: PPOM选择完成")
+                        if var in final_npl_vars:
+                            final_npl_vars.remove(var)
+
+                print(f"  {ctry}: 快速选择完成")
                 print(f"  {ctry}: 最终平行变量 (n={len(final_pl_vars)}): {final_pl_vars}")
-                print(f"  {ctry}: 最终非平行变量 (n={len(selected_npl_vars)}): {selected_npl_vars}")
-                print(f"  {ctry}: 模型改进: ΔLL = {selection_result['improvement']:.4f}")
+                print(f"  {ctry}: 最终非平行变量 (n={len(final_npl_vars)}): {final_npl_vars}")
+                print(f"  {ctry}: alpha={alpha} (PPOM选择阈值)，df=K-2={K-2}")
+
+                # 3) 用选好的结构拟合"最终模型"，计算SE/边际效应
+                print(f"  {ctry}: 拟合最终模型（含SE计算）...")
+                model = GeneralizedOrderedModel(link='logit', pl_vars=final_pl_vars)
+                res = model.fit(X_final.values, y_clean.values, feature_names=feature_names,
+                               cluster_var=cluster,
+                               verbose=False, maxiter=2000, tol=1e-6, compute_se=True)
                 
                 # 保存选择过程用于诊断
-                models[(ctry, 'ppom_selection')] = selection_result
+                models[(ctry, 'ppom_selection')] = {
+                    'selected_npl_vars': final_npl_vars,
+                    'final_pl_vars': final_pl_vars,
+                    'baseline_ll': LL0 - sum(imp[1]/2 for imp in improvement_log),
+                    'final_ll': LL0,
+                    'improvement': sum(imp[1]/2 for imp in improvement_log),
+                    'improvement_log': improvement_log,
+                    'success': res.success,
+                    'alpha': alpha,
+                    'K': K,
+                    'df_used': K - 2
+                }
                 
                 # 更新后续使用的变量
-                pl_vars = final_pl_vars  # 用于后续门槛分析
-                non_parallel_vars = selected_npl_vars
-                
-            else:
-                # 自动选择失败，回退到保守策略
-                print(f"  {ctry}: PPOM自动选择失败，使用保守的parallel约束...")
-                
-                # 将大部分变量设为parallel，只让rarity_score_z非parallel
-                pl_vars = [v for v in feature_names if v != 'rarity_score_z']
-                non_parallel_vars = ['rarity_score_z'] if 'rarity_score_z' in feature_names else []
-                
-                model = GeneralizedOrderedModel(link='logit', pl_vars=pl_vars)
-                print(f"  {ctry}: 回退到传统约束策略，拟合gologit2模型...")
-                
-                res = model.fit(
-                    X_final.values, 
-                    y_clean.values, 
-                    feature_names=feature_names,
-                    verbose=False,
-                    maxiter=2000,
-                    tol=1e-5
-                )
+                pl_vars = final_pl_vars
+                non_parallel_vars = final_npl_vars
             
             print(f"  {ctry}: 模型拟合完成：success={res.success}, nit={res.nit if hasattr(res, 'nit') else 'N/A'}")
+            print(f"  {ctry}: 使用的聚类变量已对齐（长度={len(cluster)}，唯一簇={len(pd.unique(cluster))}）")
 
             
             models[(ctry,'ordered_logit_lag')] = model  # 存储拟合好的模型对象
             models[(ctry,'ordered_logit_lag_result')] = res  # 存储结果对象
 
-            # 从gologit2结果中提取系数信息
+            # 从gologit2结果中提取系数信息（不再作为主口径展示）
             coef = np.nan
             se = np.nan  
             pval = np.nan
@@ -667,7 +709,7 @@ for ctry in countries:
                     'by_cut_table': by_cut_table
                 }
                 
-                print(f"  {ctry}: rarity_score_z 门槛系数与阈值效应：")
+                print(f"  {ctry}: rarity_score_z 门槛系数与阈值效应（报告以 dPr_ge / APE 为主口径）：")
                 print(by_cut_table.round(6))
                 print(f"  {ctry}: rarity_score_z 各类别概率效应：")
                 print(dpr_cat.round(6))
@@ -717,12 +759,6 @@ for ctry in countries:
             ordered_success = True
             
             success_msg = f"✓ {ctry}: 时间滞后gologit2回归成功（rarity_score 标准化，1单位=1SD）"
-            if not np.isnan(coef):
-                success_msg += f"，系数={coef:.4f}"
-                if not np.isnan(se):
-                    success_msg += f" (SE={se:.4f})"
-                if not np.isnan(pval):
-                    success_msg += f" (p={pval:.4f})"
             if not np.isnan(pseudo_r2):
                 success_msg += f", Pseudo-R²={pseudo_r2:.4f}"
             if not np.isnan(ame_rarity):
@@ -750,6 +786,62 @@ for ctry in countries:
             
             models[(ctry, 'ordered_logit_lag_ape_allvars')] = per_var_ape
             print(f"  {ctry}: 边际效应计算完成")
+
+            # === 可选：Cluster Bootstrap AME 与阈值效应CI ===
+            if args.bootstrap_n and args.bootstrap_n > 0:
+                print(f"  {ctry}: 启动Bootstrap (n={args.bootstrap_n}, cluster={args.bootstrap_cluster}) 以估计AME与阈值效应CI...")
+                rng = np.random.RandomState(20250820)
+                ame_boot = []
+                dpr_ge_boot = []  # list of Series indexed by threshold
+                pl_vars_current = model.pl_vars
+                feat_names_current = feature_names
+                link_current = model.link
+                clusters_all = pd.Series(cluster)
+                for b in range(int(args.bootstrap_n)):
+                    try:
+                        if args.bootstrap_cluster:
+                            uniq = clusters_all.unique()
+                            sampled = rng.choice(uniq, size=len(uniq), replace=True)
+                            parts = []
+                            for g in sampled:
+                                idx = clusters_all.index[clusters_all == g]
+                                parts.append(idx.values)
+                            if not parts:
+                                continue
+                            boot_idx = np.concatenate(parts)
+                        else:
+                            boot_idx = rng.choice(len(y_clean), size=len(y_clean), replace=True)
+                        X_b = X_final.iloc[boot_idx]
+                        y_b = y_clean.iloc[boot_idx]
+                        boot_model = GeneralizedOrderedModel(link=link_current, pl_vars=pl_vars_current)
+                        boot_res = boot_model.fit(X_b.values, y_b.values, feature_names=feat_names_current, verbose=False, compute_se=False, maxiter=1000)
+                        if not boot_res.success:
+                            continue
+                        ame_b, _ = compute_ame_expected(boot_model, X_b, 'rarity_score_z')
+                        ame_boot.append(ame_b)
+                        dpr_b = boot_res.dPr_ge_by_threshold(X_b.values, 'rarity_score_z')
+                        dpr_ge_boot.append(dpr_b)
+                    except Exception:
+                        continue
+                if len(ame_boot) > 0:
+                    ame_ci = (np.nanpercentile(ame_boot, 2.5), np.nanpercentile(ame_boot, 97.5))
+                else:
+                    ame_ci = (np.nan, np.nan)
+                if len(dpr_ge_boot) > 0:
+                    dpr_mat = pd.DataFrame(dpr_ge_boot)
+                    dpr_ci = pd.DataFrame({
+                        'low': dpr_mat.quantile(0.025),
+                        'high': dpr_mat.quantile(0.975)
+                    })
+                else:
+                    dpr_ci = None
+                models[(ctry, 'bootstrap_ci')] = {
+                    'n_success': len(ame_boot),
+                    'method': 'percentile',
+                    'ame_ci': ame_ci,
+                    'dpr_ge_ci': dpr_ci
+                }
+                print(f"  {ctry}: Bootstrap完成，有效复制 {len(ame_boot)}/{args.bootstrap_n} 次；AME 95%CI={ame_ci}")
             
         except Exception as e:
             print(f"⚠ {ctry}: gologit2回归失败: {str(e)}")
@@ -793,6 +885,7 @@ for ctry in countries:
             mask = X_simple.notna().all(axis=1) & y_ordinal.notna()
             X_simple_clean = X_simple.loc[mask]
             y_simple_clean = y_ordinal.loc[mask].astype(int)
+            cluster_simple = dfc.loc[mask, 'worker_id'].astype(str).values
             
             # 确保所有数据类型都是数值型
             for col in list(X_simple_clean.columns):
@@ -841,76 +934,61 @@ for ctry in countries:
             print(f"  {ctry}: 简化模型 - 保守parallel变量: {conservative_parallel}")
             print(f"  {ctry}: 简化模型 - 候选非平行变量: {candidate_npl_simple}")
             
-            # 对于简化模型，由于变量少，直接测试rarity_score_z是否需要非平行
+            # === 快速简化模型PPOM选择：仅测试rarity_score_z ===
             if candidate_npl_simple:
-                print(f"  {ctry}: 测试rarity_score_z是否违反比例优势假设...")
+                print(f"  {ctry}: 快速测试rarity_score_z是否违反比例优势...")
                 
-                # 全parallel模型
-                baseline_simple = GeneralizedOrderedModel(link='logit', pl_vars=feature_names_simple.copy())
-                baseline_result_simple = baseline_simple.fit(
-                    X_simple_clean.values, 
-                    y_simple_clean.values,
-                    feature_names=feature_names_simple,
-                    verbose=False,
-                    maxiter=2000
-                )
+                def fit_ll_simple(pl_vars):
+                    """简化模型快速拟合函数：只算LL，不算SE"""
+                    mdl = GeneralizedOrderedModel(link='logit', pl_vars=pl_vars)
+                    res = mdl.fit(X_simple_clean.values, y_simple_clean.values, 
+                                  feature_names=feature_names_simple, verbose=False, maxiter=300, tol=1e-4, compute_se=False)
+                    LL = -float(res.fun) if res.success else -np.inf
+                    return mdl, res, LL
                 
-                if baseline_result_simple.success:
-                    baseline_ll_simple = -baseline_result_simple.fun
+                # 基线：全parallel
+                _, baseline_res_simple, baseline_ll_simple = fit_ll_simple(feature_names_simple.copy())
+                
+                if baseline_res_simple.success:
+                    print(f"  {ctry}: 简化模型基线LL = {baseline_ll_simple:.4f}")
                     
-                    # 放开rarity_score_z的模型
-                    test_simple = GeneralizedOrderedModel(link='logit', pl_vars=conservative_parallel)
-                    test_result_simple = test_simple.fit(
-                        X_simple_clean.values,
-                        y_simple_clean.values, 
-                        feature_names=feature_names_simple,
-                        verbose=False,
-                        maxiter=2000
-                    )
+                    # 测试：放开rarity_score_z
+                    _, test_res_simple, test_ll_simple = fit_ll_simple(conservative_parallel)
                     
-                    if test_result_simple.success:
-                        test_ll_simple = -test_result_simple.fun
+                    if test_res_simple.success:
                         lr_stat_simple = 2 * (test_ll_simple - baseline_ll_simple)
-                        K_simple = len(baseline_result_simple.alphas)
-                        df_simple = K_simple - 2
-                        p_value_simple = 1 - stats.chi2.cdf(lr_stat_simple, df_simple) if lr_stat_simple > 0 else 1.0
+                        K_simple = len(baseline_res_simple.alphas)
+                        df_simple = K_simple - 2  # 简化：一个变量从parallel(1参数)变non-parallel(K-1参数)，净增K-2参数
+                        p_value_simple = 1 - stats.chi2.cdf(max(0, lr_stat_simple), df_simple) if lr_stat_simple > 0 else 1.0
                         
-                        print(f"  {ctry}: 简化模型LR检验: LR={lr_stat_simple:.2f}, p={p_value_simple:.4f} (df={df_simple})")
+                        print(f"  {ctry}: 简化模型LR检验: ΔLL={test_ll_simple-baseline_ll_simple:.3f}, LR={lr_stat_simple:.2f}, p={p_value_simple:.4f}")
                         
+                        # 选择最优结构
                         if p_value_simple < 0.05:  # 更宽松的显著性水平
-                            # rarity_score_z显著违反比例优势，使用非平行
-                            model_simple = test_simple
-                            res_simple = test_result_simple
                             pl_vars_simple = conservative_parallel
                             non_parallel_simple = candidate_npl_simple
                             print(f"  {ctry}: 简化模型选择：rarity_score_z非平行 (p={p_value_simple:.4f})")
                         else:
-                            # 保持全parallel
-                            model_simple = baseline_simple 
-                            res_simple = baseline_result_simple
                             pl_vars_simple = feature_names_simple.copy()
                             non_parallel_simple = []
-                            print(f"  {ctry}: 简化模型选择：全parallel (p={p_value_simple:.4f} > 0.05)")
+                            print(f"  {ctry}: 简化模型选择：全parallel (p={p_value_simple:.4f} >= 0.05)")
                     else:
-                        # 非平行模型拟合失败，使用全parallel
-                        model_simple = baseline_simple
-                        res_simple = baseline_result_simple
+                        # 测试模型拟合失败，保守使用全parallel
                         pl_vars_simple = feature_names_simple.copy()
                         non_parallel_simple = []
-                        print(f"  {ctry}: 简化模型：非平行模型拟合失败，使用全parallel")
+                        print(f"  {ctry}: 简化模型：测试模型拟合失败，使用全parallel")
                 else:
-                    # 基准模型拟合失败，使用保守策略
+                    # 基线模型拟合失败，使用保守策略
                     pl_vars_simple = conservative_parallel
                     non_parallel_simple = candidate_npl_simple
-                    model_simple = GeneralizedOrderedModel(link='logit', pl_vars=pl_vars_simple)
-                    res_simple = model_simple.fit(
-                        X_simple_clean.values,
-                        y_simple_clean.values,
-                        feature_names=feature_names_simple,
-                        maxiter=2000,
-                        verbose=False
-                    )
-                    print(f"  {ctry}: 简化模型：基准模型拟合失败，使用保守策略")
+                    print(f"  {ctry}: 简化模型：基线模型拟合失败，使用保守策略")
+                
+                # 用选定的结构拟合最终简化模型（含SE）
+                print(f"  {ctry}: 拟合最终简化模型（含SE计算）...")
+                model_simple = GeneralizedOrderedModel(link='logit', pl_vars=pl_vars_simple)
+                res_simple = model_simple.fit(X_simple_clean.values, y_simple_clean.values,
+                                            feature_names=feature_names_simple, maxiter=2000, verbose=False, compute_se=True,
+                                            cluster_var=cluster_simple)
             else:
                 # 没有候选变量，全parallel
                 pl_vars_simple = feature_names_simple.copy()
@@ -921,18 +999,22 @@ for ctry in countries:
                     y_simple_clean.values,
                     feature_names=feature_names_simple,
                     maxiter=2000,
-                    verbose=False
+                    verbose=False,
+                    compute_se=True,
+                    cluster_var=cluster_simple
                 )
                 print(f"  {ctry}: 简化模型：无候选非平行变量，全parallel")
             
             print(f"  {ctry}: 简化模型最终 - Parallel: {pl_vars_simple}")
             print(f"  {ctry}: 简化模型最终 - Non-parallel: {non_parallel_simple}")
+            print(f"  {ctry}: 简化模型特征来源: feature_names_simple (n={len(feature_names_simple)}); 与y_simple_clean、cluster_simple通过mask严格对齐")
             print(f"  {ctry}: 简化模型拟合完成：success={res_simple.success}")
+            print(f"  {ctry}: 简化模型使用的聚类变量已对齐（长度={len(cluster_simple)}，唯一簇={len(pd.unique(cluster_simple))}）")
             
             models[(ctry,'ordered_logit_lag_simple')] = model_simple
             models[(ctry,'ordered_logit_lag_simple_result')] = res_simple
 
-            # 从简化模型结果中提取系数信息
+            # 从简化模型结果中提取系数信息（不再作为主口径展示）
             coef = np.nan
             se = np.nan  
             pval = np.nan
@@ -1002,7 +1084,7 @@ for ctry in countries:
                     'by_cut_table': by_cut_table_simple
                 }
                 
-                print(f"  {ctry}: 简化模型 rarity_score_z 门槛系数与阈值效应：")
+                print(f"  {ctry}: 简化模型 rarity_score_z 门槛系数与阈值效应（报告以 dPr_ge / APE 为主口径）：")
                 print(by_cut_table_simple.round(6))
                 print(f"  {ctry}: 简化模型 rarity_score_z 各类别概率效应：")
                 print(dpr_cat_simple.round(6))
@@ -1046,12 +1128,6 @@ for ctry in countries:
             })
             
             success_msg = f"✓ {ctry}: 简化时间滞后gologit2回归成功（rarity_score 标准化，1单位=1SD）"
-            if not np.isnan(coef):
-                success_msg += f"，系数={coef:.4f}"
-                if not np.isnan(se):
-                    success_msg += f" (SE={se:.4f})"
-                if not np.isnan(pval):
-                    success_msg += f" (p={pval:.4f})"
             if not np.isnan(pseudo_r2):
                 success_msg += f", Pseudo-R²={pseudo_r2:.4f}"
             if not np.isnan(ame_rarity_s):
@@ -1190,6 +1266,7 @@ with open(report_path, "w", encoding="utf-8") as f:
     f.write("1. Primary: Generalized Ordered Model (gologit2) with time lag\n")
     f.write("2. Fallback: Simplified Generalized Ordered Model with essential controls only\n")
     f.write("Note: Using custom Python implementation of gologit2 (similar to Stata's gologit2)\n\n")
+    f.write("Recommended formal run flags: --bootstrap-n 200 --bootstrap-cluster\n\n")
     f.write("Time Lag Structure:\n")
     f.write("- Explanatory variables (X): t-year data (rarity_score, controls)\n")
     f.write("- Outcome variable (Y): t+1-year seniority\n")
@@ -1205,9 +1282,8 @@ with open(report_path, "w", encoding="utf-8") as f:
     f.write("- gender encoded as gender_female: female=1, male=0; other/unknown as NaN\n")
     f.write("- Generalized ordered model (gologit2) is appropriate for ordinal outcomes\n")
     f.write("- Allows different coefficients across thresholds (non-proportional odds)\n")
-    f.write("- Positive coefficient: higher rarity predicts higher future seniority\n")
-    f.write("- Negative coefficient: higher rarity predicts lower future seniority\n")
-    f.write("- Standard errors computed via numerical Hessian (when successful)\n")
+    f.write("- Interpretation prioritizes AME and probability effects (dPr(Y≥j)/dx, dPr(Y=c)/dx); coefficients are threshold-specific in PPOM and serve as supplementary outputs\n")
+    f.write("- Standard errors are cluster-robust by worker_id with HC1 correction by default (BHHH/Sandwich); numerical Hessian is used only as a last fallback and is NOT the primary method\n")
     f.write("- P-values based on z-tests (coefficient/standard error)\n")
     f.write("- Pseudo R² is McFadden's R² = 1 - (logL_full/logL_null)\n")
     f.write("- Note: gologit2 uses different parameterization than standard ordered logit\n\n")
@@ -1220,6 +1296,47 @@ with open(report_path, "w", encoding="utf-8") as f:
     f.write("Country-level summary (one row per country):\n")
     f.write(lag_results_summary.to_string(index=False))
     f.write("\n\n")
+
+    # Primary metrics section: AME(E[Y]) and dPr(Y≥j) with 95% CI when bootstrap is enabled
+    f.write("PRIMARY METRICS (for publication): AME(E[Y]) and Threshold Probability Effects with 95% CIs\n")
+    f.write("- AME(E[Y]) reported per +1 SD for rarity_score_z\n")
+    f.write("- dPr(Y≥j)/dx reported at each threshold (Junior→Assistant, ..., Leader→Chief/founder)\n")
+    f.write("- If analytic SEs are unavailable (SE=NaN), bootstrap percentile 95% CIs are used\n\n")
+    for ctry in countries:
+        f.write(f"Country: {ctry}\n")
+        # AME
+        ame_key = (ctry, 'ordered_logit_lag_ame_rarity') if (ctry, 'ordered_logit_lag_ame_rarity') in models else (
+                  (ctry, 'ordered_logit_lag_simple_ame_rarity') if (ctry, 'ordered_logit_lag_simple_ame_rarity') in models else None)
+        if ame_key is None:
+            f.write("  AME(E[Y]): N/A (model not available)\n")
+        else:
+            ame_obj = models[ame_key]
+            ame = ame_obj.get('ame', np.nan)
+            f.write(f"  AME(E[Y]) per +1 SD: {ame:.6f}")
+            ci_key = (ctry, 'bootstrap_ci')
+            if ci_key in models and models[ci_key].get('ame_ci') is not None:
+                low, high = models[ci_key]['ame_ci']
+                if np.isfinite(low) and np.isfinite(high):
+                    f.write(f"  [95% CI: {low:.6f}, {high:.6f}]\n")
+                else:
+                    f.write("  [95% CI: N/A]\n")
+            else:
+                f.write("  [95% CI: analytic or N/A]\n")
+        # Threshold probability effects
+        threshold_key = (ctry, 'threshold_analysis') if (ctry, 'threshold_analysis') in models else (
+                       (ctry, 'threshold_analysis_simple') if (ctry, 'threshold_analysis_simple') in models else None)
+        if threshold_key is None or models[threshold_key] is None:
+            f.write("  Threshold dPr(Y≥j)/dx: N/A\n\n")
+            continue
+        dpr_ge = models[threshold_key]['dpr_ge']
+        f.write("  dPr(Y≥j)/dx by threshold:\n")
+        f.write("    " + dpr_ge.to_string(float_format='%.6f').replace("\n", "\n    ") + "\n")
+        ci_key = (ctry, 'bootstrap_ci')
+        if ci_key in models and models[ci_key].get('dpr_ge_ci') is not None:
+            f.write("  95% CI (percentile) by threshold:\n")
+            dpr_ci = models[ci_key]['dpr_ge_ci']
+            f.write("    " + dpr_ci.to_string(float_format='%.6f').replace("\n", "\n    ") + "\n")
+        f.write("\n")
 
     # 写入各国"系数的平均边际效应（对期望职级E[Y]）"
     f.write("Average Marginal Effects (on expected seniority, E[Y]) by Country:\n\n")
@@ -1291,6 +1408,19 @@ with open(report_path, "w", encoding="utf-8") as f:
         f.write("Category Probability Effects:\n")
         f.write(dpr_cat.to_string(float_format='%.6f'))
         f.write("\n\n")
+
+        # 若存在Bootstrap CI，则附加
+        ci_key = (ctry, 'bootstrap_ci')
+        if ci_key in models:
+            ci_obj = models[ci_key]
+            ame_ci = ci_obj.get('ame_ci', (np.nan, np.nan))
+            dpr_ci = ci_obj.get('dpr_ge_ci', None)
+            f.write("Bootstrap Percentile CIs (if available):\n")
+            f.write(f"  AME(E[Y]) 95% CI: [{ame_ci[0]:.6f}, {ame_ci[1]:.6f}]\n")
+            if dpr_ci is not None:
+                f.write("  dPr(Y≥j)/dx 95% CI by threshold:\n")
+                f.write(dpr_ci.to_string(float_format='%.6f'))
+                f.write("\n\n")
         
         # 写入文字摘要
         if summary_key and summary_key in models:
@@ -1299,12 +1429,14 @@ with open(report_path, "w", encoding="utf-8") as f:
             f.write(summary_text)
             f.write("\n\n")
         
-        # 解读提示
+        # 解读提示（基于阈值概率效应 dPr_ge 而非单纯β系数）
         coef_by_cut = threshold_data['coef_by_cut']
-        significant_effects = [(cut, coef) for cut, coef in coef_by_cut.items() if abs(coef) > 0.02]
+        dpr_ge_series = threshold_data['dpr_ge']
+        # 使用 dPr_ge 的幅度作为阈值效应强度判定
+        significant_effects = [(cut, float(dpr_ge_series.get(cut, 0.0))) for cut in coef_by_cut.index if abs(float(dpr_ge_series.get(cut, 0.0))) > 0.005]
         
         if significant_effects:
-            f.write("Key Insights:\n")
+            f.write("Key Insights (based on dPr(Y≥j)/dx):\n")
             cuts_readable = {
                 "cut1": "Junior→Assistant",
                 "cut2": "Assistant→Regular", 
@@ -1313,12 +1445,12 @@ with open(report_path, "w", encoding="utf-8") as f:
                 "cut5": "Leader→Chief/founder"
             }
             
-            for cut, coef in significant_effects:
-                direction = "facilitates" if coef > 0 else "hinders"
+            for cut, dpr in significant_effects:
+                direction = "increases" if dpr > 0 else "decreases"
                 readable = cuts_readable.get(cut, cut)
-                f.write(f"  - {readable}: rarity {direction} this transition (β={coef:.3f})\n")
+                f.write(f"  - {readable}: rarity {direction} Pr(Y≥j) by ≈{dpr:.4f}\n")
         else:
-            f.write("Key Insights: No strong threshold-specific effects detected\n")
+            f.write("Key Insights: No strong threshold-specific probability effects detected\n")
         
         f.write("\n" + "-" * 40 + "\n")
     
@@ -1422,5 +1554,3 @@ print("="*60)
 print("时间滞后分析帮助我们理解:")
 print("1. t年的rarity_score是否能预测t+1年的职业发展")
 print("2. 这种预测效应在不同国家是否不同")
-print("3. 相比同期效应，滞后效应的大小和方向")
-print("\n建议对比前一个分析（03_fixed_effects_model.py）的同期效应!")

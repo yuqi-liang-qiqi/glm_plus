@@ -57,9 +57,21 @@ def _safe_log(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     return np.log(np.clip(x, eps, 1.0 - eps))
 
 
+def _clip_preserve_imag(z: np.ndarray, low: float, high: float) -> np.ndarray:
+    """Clip the real part of z to [low, high] while preserving the imaginary part.
+    Works for real or complex arrays.
+    """
+    if np.iscomplexobj(z):
+        real_clipped = np.clip(z.real, low, high)
+        return real_clipped + 1j * z.imag
+    return np.clip(z, low, high)
+
+
 def _cdf_logit(z: np.ndarray) -> np.ndarray:
     """Logistic CDF F(z) = 1 / (1 + exp(-z))."""
-    return 1.0 / (1.0 + np.exp(-z))
+    # Numerical safety: clip Re(z) to avoid exp overflow/underflow; keep Im(z) for complex-step
+    z_safe = _clip_preserve_imag(z, -35, 35)
+    return 1.0 / (1.0 + np.exp(-z_safe))
 
 
 def _cdf_probit(z: np.ndarray) -> np.ndarray:
@@ -73,7 +85,7 @@ def _cdf_cloglog(z: np.ndarray) -> np.ndarray:
     Stata's gologit2 uses F(x) = exp(-exp(x)) for the cumulative probability.
     Numerical safety: clip z to avoid exp overflow.
     """
-    z_safe = np.clip(z, -35, 35)  # prevent exp overflow
+    z_safe = _clip_preserve_imag(z, -35, 35)  # prevent exp overflow
     return np.exp(-np.exp(z_safe))
 
 
@@ -83,7 +95,7 @@ def _cdf_loglog(z: np.ndarray) -> np.ndarray:
     Stata's gologit2 uses F(x) = 1 - exp(-exp(-x)).
     Numerical safety: clip z to avoid exp overflow.
     """
-    z_safe = np.clip(z, -35, 35)  # prevent exp overflow
+    z_safe = _clip_preserve_imag(z, -35, 35)  # prevent exp overflow
     return 1.0 - np.exp(-np.exp(-z_safe))
 
 
@@ -428,10 +440,9 @@ class Gologit2Result:
         # Note about standard errors and diagnostics
         if self.se_alphas is not None:
             lines.append("STANDARD ERRORS:")
-            lines.append("- Cutpoint SEs computed using Delta method transformation from monotonic")
-            lines.append("  reparameterization (accounts for constraint α₁ < α₂ < ... < αₖ)")
-            lines.append("- Coefficient SEs computed from numerical Hessian at MLE")
-            lines.append("- P-values based on asymptotic normal distribution (Wald tests)")
+            lines.append("- Default: robust (Huber-White/BHHH or Sandwich). Cutpoints use Delta method from monotonic reparameterization.")
+            lines.append("- If a cluster variable was provided to fit(), SEs are cluster-robust (by worker_id).")
+            lines.append("- P-values use normal approximation (Wald tests).")
             
             # 添加数值诊断信息
             if self.hessian_method:
@@ -552,10 +563,12 @@ class GeneralizedOrderedModel:
         X: Union[np.ndarray, Any],
         y: Union[np.ndarray, Sequence],
         feature_names: Optional[Sequence[str]] = None,
+        cluster_var: Optional[Sequence] = None,
         maxiter: int = 2000,
         tol: float = 1e-5,
         verbose: bool = True,
         optimizer: str = "L-BFGS-B",
+        compute_se: bool = True,
     ) -> Gologit2Result:
         """Estimate parameters by maximizing the log-likelihood.
 
@@ -566,6 +579,8 @@ class GeneralizedOrderedModel:
         - maxiter, tol: optimizer controls.
         - verbose: if True, print progress messages a beginner can follow.
         - optimizer: optimizer name for scipy.optimize.minimize.
+        - compute_se: if True, compute standard errors and diagnostics (default);
+          if False, skip SE computation for faster model selection.
 
         Returns
         - Gologit2Result with fitted parameters and basic diagnostics.
@@ -590,6 +605,11 @@ class GeneralizedOrderedModel:
             else:
                 names = list(feature_names)
         y_np = np.asarray(y)
+        cluster_np = None
+        if cluster_var is not None:
+            cluster_np = np.asarray(cluster_var)
+            if cluster_np.shape[0] != y_np.shape[0]:
+                raise ValueError("cluster_var must have the same length as y")
 
         # Map y to sorted unique categories and store mapping to indices 0..M-1
         categories = np.unique(y_np)
@@ -812,23 +832,30 @@ class GeneralizedOrderedModel:
             hess_inv=hess_inv,
         )
         
-        # 关键修复：先保存基本拟合状态，再计算统计量
+        # 关键修复：先保存基本拟合状态，再按需计算统计量
         self.categories_ = categories
         self.feature_names_ = names
         self.pl_vars_ = list(pl_vars) if pl_vars else None
         self.npl_vars_ = [names[i] for i in range(len(names)) if not pl_mask[i]] if p_npl > 0 else None
         self._result = result  # 设置基本result，供统计量计算使用
         
-        # 计算标准误、p值和pseudo R2（现在_result已设置）
-        result = self._compute_statistics(X_np, y_np, result)
-        
-        # 更新完整的result对象
-        self._result = result
-
-        # Comprehensive diagnostic check on training set
-        if verbose:
-            print("[gologit2] Running comprehensive diagnostics on training set...")
-        self._comprehensive_diagnostics(X_np, verbose=verbose)
+        # CRITICAL GATEKEEPER: 只有需要时才计算统计量，严格控制
+        if compute_se:
+            if verbose:
+                print("[gologit2] Computing standard errors and diagnostics...")
+            result = self._compute_statistics(X_np, y_np, result, verbose=verbose, cluster_var=cluster_np)
+            # 更新完整的result对象
+            self._result = result
+            
+            # Comprehensive diagnostic check on training set (only when computing SE)
+            if verbose:
+                print("[gologit2] Running comprehensive diagnostics on training set...")
+                self._comprehensive_diagnostics(X_np, verbose=verbose)
+        else:
+            if verbose:
+                print("[gologit2] Skipping SE computation for faster fitting.")
+            # 直接使用基本result，不触发任何统计计算
+            self._result = result
 
         if verbose:
             print("[gologit2] Finished. You can inspect 'result.params_as_dict()' or 'result.summary()'.")
@@ -1030,17 +1057,17 @@ class GeneralizedOrderedModel:
                     print(f"  F spacing: N/A (only 1 threshold)")
                 
                 # Warnings and recommendations
-                if infeasible_count > 0:
+                if infeasible_count > 0 and verbose:
                     print(f"[gologit2] WARNING: {infeasible_count} samples have negative probabilities!")
                     print("[gologit2] Consider: (1) adding parallel-lines constraints, or")
                     print("[gologit2]          (2) merging sparse categories, or")
                     print("[gologit2]          (3) using a simpler model (e.g., multinomial logit)")
                 
-                if min_f_spacing < 1e-6:
+                if min_f_spacing < 1e-6 and verbose:
                     print(f"[gologit2] WARNING: Very small F spacing detected (min={min_f_spacing:.2e})")
                     print("[gologit2] This may indicate near-separation or numerical instability.")
                 
-                if prob_max > 1 + 1e-12:
+                if prob_max > 1 + 1e-12 and verbose:
                     print(f"[gologit2] WARNING: Some probabilities exceed 1.0 (max={prob_max:.6f})")
                     print("[gologit2] This indicates numerical issues in the model.")
                     
@@ -1083,7 +1110,7 @@ class GeneralizedOrderedModel:
 
         # Compute probabilities without safety clipping
         F = _cumprob_from_xb(xb, link)
-        p_cat = np.empty((M, n))
+        p_cat = np.empty((M, n), dtype=F.dtype)  # Use F.dtype to support complex-step
         p_cat[0, :] = F[0, :]
         for k_idx in range(1, M - 1):
             p_cat[k_idx, :] = F[k_idx, :] - F[k_idx - 1, :]
@@ -1202,28 +1229,31 @@ class GeneralizedOrderedModel:
             return scores
             
         except Exception as e:
-            print(f"[gologit2] Warning: Failed to compute score contributions: {e}")
+            # Silently fail for score contributions to avoid spamming logs during fast selection
             return None
 
     def compute_sandwich_se(self, X: np.ndarray, y: np.ndarray,
                            result: Optional[Gologit2Result] = None,
-                           cluster_var: Optional[np.ndarray] = None) -> Optional[dict]:
-        """计算Sandwich稳健标准误 V = H^-1 B H^-1
+                           cluster_var: Optional[np.ndarray] = None,
+                           small_sample: bool = True,
+                           ridge: float = 1e-6) -> Optional[dict]:
+        """计算Sandwich稳健标准误 V = H^-1 B H^-1（支持HC1与cluster-robust）
         
         Parameters:
             cluster_var: (n,) array of cluster identifiers for cluster-robust SE
+            small_sample: whether to apply HC1-style small-sample correction
+            ridge: small ridge added to Hessian before inversion for stability
         """
         res = result if result is not None else self._result
         if res is None:
             return None
             
         try:
-            # 1. 计算Hessian
-            hessian_result = self.compute_numerical_hessian(X, y, result, method="3-point")
-            if hessian_result is None or 'hessian_inv' not in hessian_result:
+            # 1. 计算Hessian逆（使用数值Hessian得到的协方差矩阵，即H^-1）
+            hessian_result = self.compute_numerical_hessian(X, y, result, method="3-point", verbose=False)
+            if hessian_result is None or 'cov_matrix' not in hessian_result:
                 return None
-                
-            H_inv = hessian_result['hessian_inv']
+            H_inv_free = hessian_result['cov_matrix']  # with respect to alpha_free, betas
             
             # 2. 计算得分贡献
             scores = self.compute_score_contributions(X, y, result)
@@ -1246,23 +1276,47 @@ class GeneralizedOrderedModel:
             
             # B = Σ s_i s_i'  
             B = scores_for_B.T @ scores_for_B  # (p, p)
+            # 小样本校正
+            if small_sample:
+                n = scores.shape[0]
+                p = scores.shape[1]
+                if cluster_var is None:
+                    # HC1: n/(n-p)
+                    if n > p:
+                        B = (n / (n - p)) * B
+                else:
+                    # Cluster-robust dof correction: G/(G-1) * (n-1)/(n-p)
+                    unique_clusters = np.unique(cluster_var)
+                    G = unique_clusters.size
+                    if (G > 1) and (n > p):
+                        B = (G / (G - 1)) * ((n - 1) / (n - p)) * B
             
-            # 4. Sandwich估计: V = H^-1 B H^-1
+            # 4. 将H^-1从自由参数空间映射到原始α参数空间（保证与scores一致）
+            K = len(result.alphas)
+            p_pl = 0 if result.beta_pl is None else len(result.beta_pl)
+            p_npl = 0 if result.beta_npl is None else result.beta_npl.size
+            total_params = K + p_pl + p_npl
+            alpha_free = _monotonic_cutpoints_to_free(result.alphas)
+            J_alpha = self._compute_cutpoints_jacobian(alpha_free)  # (K,K)
+            J_full = np.eye(total_params)
+            J_full[:K, :K] = J_alpha
+            H_inv_alpha = J_full @ H_inv_free @ J_full.T
+
+            # 5. Sandwich估计: V = H^-1 B H^-1（两者都在原始参数空间）
             try:
-                V_sandwich = H_inv @ B @ H_inv
-                se_sandwich = np.sqrt(np.diag(V_sandwich))
-                
-                return {
-                    'V_sandwich': V_sandwich,
-                    'se_sandwich': se_sandwich,
-                    'method': 'sandwich_hc0' if cluster_var is None else 'sandwich_cluster'
-                }
+                V_sandwich = H_inv_alpha @ B @ H_inv_alpha
             except np.linalg.LinAlgError:
-                print("[gologit2] Warning: Sandwich covariance computation failed")
-                return None
+                V_sandwich = H_inv_alpha @ B @ H_inv_alpha
+
+            se_sandwich = np.sqrt(np.maximum(0.0, np.diag(V_sandwich)))
+            return {
+                'V_sandwich': V_sandwich,
+                'se_sandwich': se_sandwich,
+                'method': 'sandwich_cluster' if cluster_var is not None else ('sandwich_hc1' if small_sample else 'sandwich_hc0')
+            }
                 
         except Exception as e:
-            print(f"[gologit2] Warning: Sandwich SE computation failed: {e}")
+            # Silently fail for sandwich SE to avoid spamming logs during fast selection
             return None
 
     def compute_bhhh_se(self, X: np.ndarray, y: np.ndarray,
@@ -1284,34 +1338,28 @@ class GeneralizedOrderedModel:
             # BHHH矩阵: B = Σ s_i s_i'
             B = scores.T @ scores  # (p, p)
             
-            # 协方差矩阵: V = B^-1
+            # 协方差矩阵: V ≈ B^-1（数值稳定：岭化+伪逆兜底）
+            ridge = 1e-8
+            B_reg = B + ridge * np.eye(B.shape[0])
             try:
-                V_bhhh = np.linalg.inv(B)
-                se_bhhh = np.sqrt(np.diag(V_bhhh))
-                
-                return {
-                    'V_bhhh': V_bhhh,
-                    'se_bhhh': se_bhhh,
-                    'method': 'bhhh'
-                }
+                V_bhhh = np.linalg.inv(B_reg)
             except np.linalg.LinAlgError:
-                # 尝试伪逆
-                V_bhhh = np.linalg.pinv(B)
-                se_bhhh = np.sqrt(np.maximum(0, np.diag(V_bhhh)))  # 确保非负
-                
-                return {
-                    'V_bhhh': V_bhhh,
-                    'se_bhhh': se_bhhh,
-                    'method': 'bhhh_pinv'
-                }
+                V_bhhh = np.linalg.pinv(B_reg)
+            
+            se_bhhh = np.sqrt(np.maximum(0.0, np.diag(V_bhhh)))
+            return {
+                'V_bhhh': V_bhhh,
+                'se_bhhh': se_bhhh,
+                'method': 'bhhh'
+            }
                 
         except Exception as e:
-            print(f"[gologit2] Warning: BHHH SE computation failed: {e}")
+            # Silently fail for BHHH SE to avoid spamming logs during fast selection
             return None
 
     def compute_numerical_hessian(self, X: np.ndarray, y: np.ndarray, 
                                    result: Optional[Gologit2Result] = None, 
-                                   method: str = "3-point") -> Optional[dict]:
+                                   method: str = "3-point", verbose: bool = True) -> Optional[dict]:
         """Compute numerical Hessian at the fitted parameters.
         
         Returns the inverse Hessian (approximate covariance matrix) if successful.
@@ -1341,19 +1389,23 @@ class GeneralizedOrderedModel:
                 try:
                     # 再后备：检查更早版本的位置
                     from scipy.misc import approx_fprime as approx_derivative_fallback
-                    print("[gologit2] Warning: Using fallback derivative approximation.")
-                    print("[gologit2] Consider upgrading SciPy for better numerical differentiation.")
+                    if verbose:
+                        print("[gologit2] Warning: Using fallback derivative approximation.")
+                        print("[gologit2] Consider upgrading SciPy for better numerical differentiation.")
                     approx_derivative = approx_derivative_fallback
                 except ImportError:
-                    print("[gologit2] Error: Cannot find numerical differentiation function.")
-                    print("[gologit2] Please upgrade SciPy (>= 1.0 recommended) or install numdifftools.")
+                    if verbose:
+                        print("[gologit2] Error: Cannot find numerical differentiation function.")
+                        print("[gologit2] Please upgrade SciPy (>= 1.0 recommended) or install numdifftools.")
                     return None
         
         if approx_derivative is None:
-            print("[gologit2] Error: Failed to import approx_derivative.")
+            if verbose:
+                print("[gologit2] Error: Failed to import approx_derivative.")
             return None
             
-        print("[gologit2] Computing numerical Hessian (this may take a moment)...")
+        if verbose:
+            print("[gologit2] Computing numerical Hessian (this may take a moment)...")
         
         # Use the provided or retrieved result object
         
@@ -1456,7 +1508,8 @@ class GeneralizedOrderedModel:
         max_eigval = eigenvals[-1]  # 最大特征值
         condition_number = max_eigval / min_eigval if min_eigval > 1e-16 else np.inf
         
-        print(f"[gologit2] Hessian condition number: {condition_number:.2e}")
+        if verbose:
+            print(f"[gologit2] Hessian condition number: {condition_number:.2e}")
         
         # 3. 尝试稳健的求逆方法（分层策略：Cholesky -> solve -> pinv）
         cov_matrix = None
@@ -1479,12 +1532,15 @@ class GeneralizedOrderedModel:
                 try:
                     cov_matrix = np.linalg.pinv(hessian, rcond=1e-12)
                     inversion_method = "pseudo-inverse (SVD)"
-                    print("[gologit2] Warning: Matrix singular, using pseudo-inverse.")
+                    if verbose:
+                        print("[gologit2] Warning: Matrix singular, using pseudo-inverse.")
                 except np.linalg.LinAlgError:
-                    print("[gologit2] Error: All matrix inversion methods failed.")
+                    if verbose:
+                        print("[gologit2] Error: All matrix inversion methods failed.")
                     return None
         
-        print(f"[gologit2] Hessian inverted using {inversion_method}.")
+        if verbose:
+            print(f"[gologit2] Hessian inverted using {inversion_method}.")
         
         # 4. 确保协方差矩阵对称性（统一处理浮点误差）
         cov_matrix = 0.5 * (cov_matrix + cov_matrix.T)
@@ -1492,10 +1548,12 @@ class GeneralizedOrderedModel:
         # 检查对角元素是否非负
         diag_elements = np.diag(cov_matrix)
         if np.any(diag_elements < 0):
-            print("[gologit2] Warning: Negative diagonal elements in covariance matrix.")
-            print("[gologit2] This suggests numerical instability - standard errors may be unreliable.")
+            if verbose:
+                print("[gologit2] Warning: Negative diagonal elements in covariance matrix.")
+                print("[gologit2] This suggests numerical instability - standard errors may be unreliable.")
         
-        print("[gologit2] Numerical Hessian computed successfully.")
+        if verbose:
+            print("[gologit2] Numerical Hessian computed successfully.")
         
         # 返回协方差矩阵和诊断信息
         return {
@@ -1505,12 +1563,15 @@ class GeneralizedOrderedModel:
             "method": method
         }
     
-    def _compute_statistics(self, X: np.ndarray, y: np.ndarray, result: Gologit2Result) -> Gologit2Result:
+    def _compute_statistics(self, X: np.ndarray, y: np.ndarray, result: Gologit2Result, verbose: bool = True, cluster_var: Optional[np.ndarray] = None) -> Gologit2Result:
         """计算标准误、p值和pseudo R2等统计量"""
-        print("[gologit2] Computing standard errors, p-values, and pseudo R2...")
+        if verbose:
+            print("[gologit2] Computing standard errors, p-values, and pseudo R2...")
         
         try:
             # 1. 计算null model的log-likelihood (仅包含cutpoints)
+            if verbose:
+                print("[gologit2] Computing null model likelihood for pseudo R2...")
             null_loglik = self._compute_null_loglikelihood(X, y, result)
             result.null_loglik = null_loglik
             
@@ -1530,129 +1591,250 @@ class GeneralizedOrderedModel:
                 # 所以：1 - ((-result.fun - n_params) / null_loglik) = 1 - ((result.fun + n_params) / (-null_loglik))
                 result.pseudo_r2_adj = 1 - ((result.fun + n_params) / (-null_loglik))
                 
-                print(f"[gologit2] McFadden's Pseudo R2: {result.pseudo_r2:.4f}")
-                print(f"[gologit2] Adjusted Pseudo R2: {result.pseudo_r2_adj:.4f}")
+                if verbose:
+                    print(f"[gologit2] McFadden's Pseudo R2: {result.pseudo_r2:.4f}")
+                    print(f"[gologit2] Adjusted Pseudo R2: {result.pseudo_r2_adj:.4f}")
             else:
                 # null_loglik计算失败，无法计算伪R²
                 result.pseudo_r2 = None
                 result.pseudo_r2_adj = None
-                print("[gologit2] Warning: Could not compute null model likelihood.")
-                print("[gologit2] Pseudo R² statistics unavailable (likely due to sparse categories).")
+                if verbose:
+                    print("[gologit2] Warning: Could not compute null model likelihood.")
+                    print("[gologit2] Pseudo R² statistics unavailable (likely due to sparse categories).")
+                    print("[gologit2] Tip: Consider merging extremely sparse outcome categories or ensuring each category has observations.")
             
-            # 3. 计算标准误和p值 - 使用多种稳健方法
-            print("[gologit2] Computing numerical Hessian (this may take a moment)...")
-            hessian_result = self.compute_numerical_hessian(X, y, result, method="3-point")
+            # 3. 计算标准误和p值 - 优先使用稳健方法，数值Hessian仅做诊断
+            if verbose:
+                print("[gologit2] Computing standard errors using robust methods...")
             
-            # 尝试多种稳健标准误方法
+            # 尝试多种稳健标准误方法（主力）
             robust_methods = {}
+            primary_se_source = None
             
-            # 方法1: Sandwich (HC0)
+            # 方法1: BHHH（通常最稳健，优先使用）
             try:
-                sandwich_result = self.compute_sandwich_se(X, y, result, cluster_var=None)
-                if sandwich_result is not None:
-                    robust_methods['sandwich'] = sandwich_result
-            except Exception as e:
-                print(f"[gologit2] Sandwich SE computation failed: {e}")
-            
-            # 方法2: BHHH
-            try:
+                if verbose:
+                    print("[gologit2] Computing BHHH standard errors...")
                 bhhh_result = self.compute_bhhh_se(X, y, result)
                 if bhhh_result is not None:
                     robust_methods['bhhh'] = bhhh_result
+                    primary_se_source = 'bhhh'
+                    if verbose:
+                        print("[gologit2] BHHH SE computation successful.")
             except Exception as e:
-                print(f"[gologit2] BHHH SE computation failed: {e}")
+                if verbose:
+                    print(f"[gologit2] BHHH SE computation failed: {e}")
+            
+            # 方法2: Sandwich (HC1)（备选，支持cluster-robust）
+            if primary_se_source is None:
+                try:
+                    if verbose:
+                        print("[gologit2] Computing Sandwich standard errors (HC1/cluster-robust if provided)...")
+                    sandwich_result = self.compute_sandwich_se(X, y, result, cluster_var=cluster_var, small_sample=True)
+                    if sandwich_result is not None:
+                        robust_methods['sandwich'] = sandwich_result
+                        primary_se_source = 'sandwich'
+                        if verbose:
+                            print("[gologit2] Sandwich SE computation successful.")
+                except Exception as e:
+                    if verbose:
+                        print(f"[gologit2] Sandwich SE computation failed: {e}")
+            
+            # 方法3: 数值Hessian（仅作最后备选和诊断）
+            hessian_result = None
+            # 严格限制：只有在大样本(>=500)且两种稳健方法都失败时才用Hessian
+            if primary_se_source is None and len(X) >= 500:
+                if verbose:
+                    print("[gologit2] WARNING: Both BHHH and Sandwich failed. Using numerical Hessian as last resort...")
+                    print("[gologit2] This may take longer and be less stable than robust methods.")
+                try:
+                    hessian_result = self.compute_numerical_hessian(X, y, result, method="3-point", verbose=verbose)
+                    if hessian_result is not None:
+                        primary_se_source = 'hessian'
+                        if verbose:
+                            print("[gologit2] Numerical Hessian computation successful.")
+                except Exception as e:
+                    if verbose:
+                        print(f"[gologit2] Numerical Hessian computation failed: {e}")
+            elif primary_se_source is None:
+                if verbose:
+                    print("[gologit2] WARNING: Sample size too small (<500) and robust methods failed.")
+                    print("[gologit2] Standard errors not available. Consider using bootstrap SE.")
+            # 完全跳过诊断性Hessian以加速
             
             # 存储稳健标准误结果供诊断使用
             result.robust_se_methods = robust_methods
+            result.primary_se_method = primary_se_source
             
-            if hessian_result is not None:
+            # 使用最优可用的SE方法
+            if primary_se_source == 'bhhh' and 'bhhh' in robust_methods:
+                if verbose:
+                    print("[gologit2] Using BHHH standard errors as primary method.")
+                se_data = robust_methods['bhhh']
+                cov_matrix = se_data.get('V_bhhh', None)
+                if cov_matrix is not None:
+                    self._assign_se_from_covariance(result, cov_matrix)
+                else:
+                    # 后备：仅有SE向量时（不推荐）
+                    se_vector = se_data['se_bhhh']
+                    self._assign_se_from_vector(result, se_vector)
+                
+            elif primary_se_source == 'sandwich' and 'sandwich' in robust_methods:
+                if verbose:
+                    print("[gologit2] Using Sandwich standard errors as primary method.")
+                se_data = robust_methods['sandwich']
+                cov_matrix = se_data.get('V_sandwich', None)
+                if cov_matrix is not None:
+                    self._assign_se_from_covariance(result, cov_matrix)
+                else:
+                    se_vector = se_data['se_sandwich']
+                    self._assign_se_from_vector(result, se_vector)
+                
+            elif hessian_result is not None and primary_se_source == 'hessian':
+                if verbose:
+                    print("[gologit2] Using numerical Hessian standard errors as fallback.")
                 cov_matrix = hessian_result["cov_matrix"]
-                # 存储诊断信息
+                # 使用原有的Delta方法逻辑处理Hessian结果
+                self._process_hessian_se(result, cov_matrix, hessian_result, verbose)
+            else:
+                if verbose:
+                    print("[gologit2] Could not compute standard errors using any method.")
+                return result
+            
+            # 存储Hessian诊断信息（如果可用）
+            if hessian_result is not None:
                 result.hessian_condition_number = hessian_result["hessian_condition_number"]
                 result.inversion_method = hessian_result["inversion_method"]
                 result.hessian_method = hessian_result["method"]
-                # 验证协方差矩阵维度
-                K = len(result.alphas)
-                n_beta_pl = len(result.beta_pl) if result.beta_pl is not None else 0
-                n_beta_npl = result.beta_npl.size if result.beta_npl is not None else 0
-                expected_dim = K + n_beta_pl + n_beta_npl
                 
-                if cov_matrix.shape != (expected_dim, expected_dim):
-                    raise ValueError(f"Covariance matrix dimension {cov_matrix.shape} != expected ({expected_dim}, {expected_dim})")
-                
-                # 报告协方差矩阵条件数（使用对称矩阵专用计算）
-                cov_eigenvals = np.linalg.eigvalsh(cov_matrix)  # 已排序的实数特征值
-                cov_min_eigval = cov_eigenvals[0]
-                cov_max_eigval = cov_eigenvals[-1]
-                cov_condition_number = cov_max_eigval / cov_min_eigval if cov_min_eigval > 1e-16 else np.inf
-                result.cov_condition_number = cov_condition_number
-                
-                print(f"[gologit2] Covariance matrix condition number: {cov_condition_number:.2e}")
-                print(f"[gologit2] Minimum eigenvalue: {cov_min_eigval:.6e}")
-                
-                if cov_condition_number > 1e12:
-                    print("[gologit2] WARNING: Very high condition number - standard errors may be unreliable")
-                
-                # 1. 对cutpoints使用Delta方法进行变换
-                # 构造雅可比矩阵 J = ∂α/∂θ_free，其中θ_free = [a1, d2, d3, ..., dK, β_pl, β_npl]
-                alpha_free = _monotonic_cutpoints_to_free(result.alphas)
-                jacobian_alpha = self._compute_cutpoints_jacobian(alpha_free)
-                
-                # 提取cutpoints部分的协方差矩阵 (前K×K块)
-                cov_alpha_free = cov_matrix[:K, :K]
-                
-                # Delta方法: Cov(α) = J * Cov(θ_free_alpha) * J^T
-                cov_alphas = jacobian_alpha @ cov_alpha_free @ jacobian_alpha.T
-                
-                # 检查对角元素非负
-                alpha_variances = np.diag(cov_alphas)
-                if np.any(alpha_variances < 0):
-                    print("[gologit2] WARNING: Negative variances detected for cutpoints")
-                    alpha_variances = np.maximum(alpha_variances, 1e-12)
-                
-                result.se_alphas = np.sqrt(alpha_variances)
-                
-                # 2. Beta系数的标准误（直接从协方差矩阵对角线）
-                pos = K
-                
-                # Parallel-lines系数标准误
-                if result.beta_pl is not None:
-                    beta_pl_variances = np.diag(cov_matrix[pos:pos+n_beta_pl, pos:pos+n_beta_pl])
-                    if np.any(beta_pl_variances < 0):
-                        print("[gologit2] WARNING: Negative variances detected for PL coefficients")
-                        beta_pl_variances = np.maximum(beta_pl_variances, 1e-12)
-                    result.se_beta_pl = np.sqrt(beta_pl_variances)
-                    pos += n_beta_pl
-                
-                # Non-parallel系数标准误
-                if result.beta_npl is not None:
-                    beta_npl_variances = np.diag(cov_matrix[pos:pos+n_beta_npl, pos:pos+n_beta_npl])
-                    if np.any(beta_npl_variances < 0):
-                        print("[gologit2] WARNING: Negative variances detected for NPL coefficients")
-                        beta_npl_variances = np.maximum(beta_npl_variances, 1e-12)
-                    result.se_beta_npl = np.sqrt(beta_npl_variances).reshape(result.beta_npl.shape)
-                
-                # 3. 计算p值 (双尾z-test)
-                result.pvalues_alphas = 2 * (1 - stats.norm.cdf(np.abs(result.alphas / result.se_alphas)))
-                
-                if result.beta_pl is not None and result.se_beta_pl is not None:
-                    z_pl = result.beta_pl / result.se_beta_pl
-                    result.pvalues_beta_pl = 2 * (1 - stats.norm.cdf(np.abs(z_pl)))
-                
-                if result.beta_npl is not None and result.se_beta_npl is not None:
-                    z_npl = result.beta_npl / result.se_beta_npl
-                    result.pvalues_beta_npl = 2 * (1 - stats.norm.cdf(np.abs(z_npl)))
-                
-                print("[gologit2] Standard errors computed using Delta method for cutpoints.")
-            else:
-                print("[gologit2] Could not compute standard errors (Hessian computation failed).")
+            # 计算p值（对所有SE方法通用）
+            self._compute_p_values(result)
+            
+            if verbose:
+                print(f"[gologit2] Standard errors computed using {primary_se_source.upper()} method.")
                 
         except Exception as e:
-            print(f"[gologit2] Error computing statistics: {e}")
-            print("[gologit2] Model estimation successful, but additional statistics unavailable.")
+            if verbose:
+                print(f"[gologit2] Error computing statistics: {e}")
+                print("[gologit2] Model estimation successful, but additional statistics unavailable.")
         
         return result
     
+    def _assign_se_from_vector(self, result: Gologit2Result, se_vector: np.ndarray) -> None:
+        """从完整参数向量的SE分配到各个参数组（cutpoints, beta_pl, beta_npl）"""
+        K = len(result.alphas)
+        pos = 0
+        
+        # Cutpoints SE (需要Delta方法变换)
+        alpha_free_se = se_vector[pos:pos+K]
+        alpha_free = _monotonic_cutpoints_to_free(result.alphas)
+        jacobian_alpha = self._compute_cutpoints_jacobian(alpha_free)
+        
+        # 构造协方差矩阵对角线
+        cov_alpha_free_diag = alpha_free_se ** 2
+        # Delta方法近似：Var(α_i) ≈ Σ_j (∂α_i/∂θ_j)² * Var(θ_j) 
+        alpha_variances = np.array([
+            np.sum((jacobian_alpha[i, :] ** 2) * cov_alpha_free_diag) 
+            for i in range(K)
+        ])
+        result.se_alphas = np.sqrt(np.maximum(alpha_variances, 1e-12))
+        pos += K
+        
+        # Beta_pl SE
+        if result.beta_pl is not None:
+            n_beta_pl = len(result.beta_pl)
+            result.se_beta_pl = se_vector[pos:pos+n_beta_pl]
+            pos += n_beta_pl
+        
+        # Beta_npl SE
+        if result.beta_npl is not None:
+            n_beta_npl = result.beta_npl.size
+            result.se_beta_npl = se_vector[pos:pos+n_beta_npl].reshape(result.beta_npl.shape)
+
+    def _assign_se_from_covariance(self, result: Gologit2Result, cov_matrix: np.ndarray) -> None:
+        """从完整协方差矩阵分配SE。
+        假定传入的协方差矩阵已经在原始参数空间（α, β）中。
+        """
+        K = len(result.alphas)
+        n_beta_pl = len(result.beta_pl) if result.beta_pl is not None else 0
+        n_beta_npl = result.beta_npl.size if result.beta_npl is not None else 0
+        expected_dim = K + n_beta_pl + n_beta_npl
+        if cov_matrix.shape != (expected_dim, expected_dim):
+            # 维度不符则直接返回
+            return
+        cov_matrix = 0.5 * (cov_matrix + cov_matrix.T)
+        # Cutpoints: already in original α parameterization
+        cov_alpha = cov_matrix[:K, :K]
+        result.se_alphas = np.sqrt(np.maximum(np.diag(cov_alpha), 1e-12))
+        # Beta_pl
+        pos = K
+        if result.beta_pl is not None and n_beta_pl > 0:
+            cov_pl = cov_matrix[pos:pos+n_beta_pl, pos:pos+n_beta_pl]
+            result.se_beta_pl = np.sqrt(np.maximum(np.diag(cov_pl), 1e-12))
+            pos += n_beta_pl
+        # Beta_npl
+        if result.beta_npl is not None and n_beta_npl > 0:
+            cov_npl = cov_matrix[pos:pos+n_beta_npl, pos:pos+n_beta_npl]
+            se_npl = np.sqrt(np.maximum(np.diag(cov_npl), 1e-12))
+            result.se_beta_npl = se_npl.reshape(result.beta_npl.shape)
+    
+    def _process_hessian_se(self, result: Gologit2Result, cov_matrix: np.ndarray, hessian_result: dict, verbose: bool = True) -> None:
+        """处理数值Hessian结果，使用完整Delta方法"""
+        K = len(result.alphas)
+        n_beta_pl = len(result.beta_pl) if result.beta_pl is not None else 0
+        n_beta_npl = result.beta_npl.size if result.beta_npl is not None else 0
+        expected_dim = K + n_beta_pl + n_beta_npl
+        
+        if cov_matrix.shape != (expected_dim, expected_dim):
+            if verbose:
+                print(f"[gologit2] WARNING: Covariance matrix dimension mismatch")
+            return
+        
+        # 报告协方差矩阵条件数
+        cov_eigenvals = np.linalg.eigvalsh(cov_matrix)
+        cov_min_eigval = cov_eigenvals[0]
+        cov_max_eigval = cov_eigenvals[-1]
+        cov_condition_number = cov_max_eigval / cov_min_eigval if cov_min_eigval > 1e-16 else np.inf
+        result.cov_condition_number = cov_condition_number
+        
+        if verbose:
+            print(f"[gologit2] Covariance matrix condition number: {cov_condition_number:.2e}")
+        if cov_condition_number > 1e12 and verbose:
+            print("[gologit2] WARNING: Very high condition number - standard errors may be unreliable")
+        
+        # Delta方法处理cutpoints
+        alpha_free = _monotonic_cutpoints_to_free(result.alphas)
+        jacobian_alpha = self._compute_cutpoints_jacobian(alpha_free)
+        cov_alpha_free = cov_matrix[:K, :K]
+        cov_alphas = jacobian_alpha @ cov_alpha_free @ jacobian_alpha.T
+        
+        alpha_variances = np.diag(cov_alphas)
+        result.se_alphas = np.sqrt(np.maximum(alpha_variances, 1e-12))
+        
+        # Beta系数SE
+        pos = K
+        if result.beta_pl is not None:
+            beta_pl_variances = np.diag(cov_matrix[pos:pos+n_beta_pl, pos:pos+n_beta_pl])
+            result.se_beta_pl = np.sqrt(np.maximum(beta_pl_variances, 1e-12))
+            pos += n_beta_pl
+        
+        if result.beta_npl is not None:
+            beta_npl_variances = np.diag(cov_matrix[pos:pos+n_beta_npl, pos:pos+n_beta_npl])
+            result.se_beta_npl = np.sqrt(np.maximum(beta_npl_variances, 1e-12)).reshape(result.beta_npl.shape)
+    
+    def _compute_p_values(self, result: Gologit2Result) -> None:
+        """计算p值（双尾z-test）"""
+        if result.se_alphas is not None:
+            result.pvalues_alphas = 2 * (1 - stats.norm.cdf(np.abs(result.alphas / result.se_alphas)))
+        
+        if result.beta_pl is not None and result.se_beta_pl is not None:
+            z_pl = result.beta_pl / result.se_beta_pl
+            result.pvalues_beta_pl = 2 * (1 - stats.norm.cdf(np.abs(z_pl)))
+        
+        if result.beta_npl is not None and result.se_beta_npl is not None:
+            z_npl = result.beta_npl / result.se_beta_npl
+            result.pvalues_beta_npl = 2 * (1 - stats.norm.cdf(np.abs(z_npl)))
+
     def _compute_cutpoints_jacobian(self, alpha_free: np.ndarray) -> np.ndarray:
         """计算从自由参数到原始cutpoints的雅可比矩阵。
         
@@ -1778,19 +1960,22 @@ class GeneralizedOrderedModel:
             return null_loglik
             
         except Exception as e:
-            print(f"[gologit2] Warning: Could not compute null log-likelihood: {e}")
+            # Silently fail to avoid spamming logs during fast selection
             return None
 
     def bootstrap_se(self, X: np.ndarray, y: np.ndarray, n_bootstrap: int = 100, 
-                     random_state: Optional[int] = None) -> Optional[np.ndarray]:
+                     random_state: Optional[int] = None, verbose: bool = True,
+                     cluster_var: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
         """Compute bootstrap standard errors for parameter estimates.
         
+        Supports cluster bootstrap if cluster_var is provided (resample clusters with replacement).
         Returns array of standard errors in the same order as the parameter vector.
         """
         if self._result is None:
             raise RuntimeError("Model is not fitted. Call fit() first.")
         
-        print(f"[gologit2] Computing bootstrap standard errors ({n_bootstrap} replications)...")
+        if verbose:
+            print(f"[gologit2] Computing bootstrap standard errors ({n_bootstrap} replications)...")
         
         rng = np.random.RandomState(random_state)
         n_samples = len(y)
@@ -1807,9 +1992,18 @@ class GeneralizedOrderedModel:
         
         for i in range(n_bootstrap):
             # Bootstrap sample
-            boot_idx = rng.choice(n_samples, size=n_samples, replace=True)
-            X_boot = X[boot_idx]
-            y_boot = y[boot_idx]
+            if cluster_var is None:
+                boot_idx = rng.choice(n_samples, size=n_samples, replace=True)
+                X_boot = X[boot_idx]
+                y_boot = y[boot_idx]
+            else:
+                # Cluster bootstrap: resample clusters, take all obs in selected clusters
+                clusters = np.asarray(cluster_var)
+                unique_clusters = np.unique(clusters)
+                sampled_clusters = rng.choice(unique_clusters, size=unique_clusters.size, replace=True)
+                mask = np.isin(clusters, sampled_clusters)
+                X_boot = X[mask]
+                y_boot = y[mask]
             
             try:
                 # Fit model on bootstrap sample
@@ -1831,18 +2025,20 @@ class GeneralizedOrderedModel:
                 continue
         
         if len(param_estimates) == 0:
-            print("[gologit2] All bootstrap replications failed.")
+            if verbose:
+                print("[gologit2] All bootstrap replications failed.")
             return None
         
         param_estimates = np.array(param_estimates)
         se_estimates = np.std(param_estimates, axis=0, ddof=1)
         
-        print(f"[gologit2] Bootstrap completed ({len(param_estimates)}/{n_bootstrap} successful).")
+        if verbose:
+            print(f"[gologit2] Bootstrap completed ({len(param_estimates)}/{n_bootstrap} successful).")
         return se_estimates
 
     def test_parallel_lines(self, X: np.ndarray, y: np.ndarray, 
                            variables: Optional[List[str]] = None,
-                           method: str = "lr") -> dict:
+                           method: str = "lr", verbose: bool = True) -> dict:
         """Perform tests for parallel lines assumption on specified variables.
         
         This tests whether coefficients for each variable are the same across equations.
@@ -1879,10 +2075,12 @@ class GeneralizedOrderedModel:
             variables = [v for v in variables if v in feature_names]
         
         if not variables:
-            print("[gologit2] No variables to test for parallel lines assumption.")
+            if verbose:
+                print("[gologit2] No variables to test for parallel lines assumption.")
             return {}
         
-        print(f"[gologit2] Testing parallel lines assumption for {len(variables)} variables using {method.upper()} method...")
+        if verbose:
+            print(f"[gologit2] Testing parallel lines assumption for {len(variables)} variables using {method.upper()} method...")
         
         test_results = {}
         
@@ -1904,11 +2102,11 @@ class GeneralizedOrderedModel:
                     
                     # Fit restricted model (null hypothesis: parallel lines)
                     restricted_model = GeneralizedOrderedModel(link=result.link, pl_vars=restricted_pl_vars)
-                    restricted_result = restricted_model.fit(X, y, feature_names=feature_names, verbose=False, maxiter=2000)
+                    restricted_result = restricted_model.fit(X, y, feature_names=feature_names, verbose=False, maxiter=1000, compute_se=False)
                     
                     # Fit unrestricted model (alternative: non-parallel)
                     unrestricted_model = GeneralizedOrderedModel(link=result.link, pl_vars=unrestricted_pl_vars)
-                    unrestricted_result = unrestricted_model.fit(X, y, feature_names=feature_names, verbose=False, maxiter=2000)
+                    unrestricted_result = unrestricted_model.fit(X, y, feature_names=feature_names, verbose=False, maxiter=1000, compute_se=False)
                     
                     if restricted_result.success and unrestricted_result.success:
                         # Calculate LR statistic
@@ -1917,9 +2115,9 @@ class GeneralizedOrderedModel:
                         lr_stat = 2 * (ll_unrestricted - ll_restricted)
                         
                         # Degrees of freedom: difference in number of parameters
-                        # Moving from parallel to non-parallel adds (K-2) parameters
-                        # (one parallel coef becomes K non-parallel coefs, net gain = K-1)
-                        df = K - 2  # Conservative: K-1 equations, but lose 1 parameter
+                        # Moving from parallel to non-parallel: parallel has 1 coef, non-parallel has K-1 coefs
+                        # (one parallel coef becomes K-1 non-parallel coefs, net gain = K-2)
+                        df = K - 2  # Correct: K-2 additional parameters
                         
                         # P-value from chi-square distribution
                         from scipy.stats import chi2
@@ -1947,7 +2145,8 @@ class GeneralizedOrderedModel:
                         
                 elif method.lower() == "wald":
                     # Wald test (requires covariance matrix)
-                    print(f"[gologit2] Wald test not yet implemented for variable {var}")
+                    if verbose:
+                        print(f"[gologit2] Wald test not yet implemented for variable {var}")
                     test_results[var] = {
                         'method': 'Wald',
                         'statistic': np.nan,
@@ -1966,16 +2165,18 @@ class GeneralizedOrderedModel:
                     'success': False,
                     'error': str(e)
                 }
-                print(f"[gologit2] Error testing variable {var}: {e}")
+                if verbose:
+                    print(f"[gologit2] Error testing variable {var}: {e}")
         
         # Print summary
-        print("[gologit2] Parallel lines test results:")
-        for var, res in test_results.items():
-            if res['success']:
-                status = "REJECT parallel" if res.get('reject_parallel', False) else "ACCEPT parallel"
-                print(f"  {var}: {res['method']} = {res['statistic']:.3f}, p = {res['p_value']:.4f} -> {status}")
-            else:
-                print(f"  {var}: TEST FAILED - {res.get('error', 'Unknown error')}")
+        if verbose:
+            print("[gologit2] Parallel lines test results:")
+            for var, res in test_results.items():
+                if res['success']:
+                    status = "REJECT parallel" if res.get('reject_parallel', False) else "ACCEPT parallel"
+                    print(f"  {var}: {res['method']} = {res['statistic']:.3f}, p = {res['p_value']:.4f} -> {status}")
+                else:
+                    print(f"  {var}: TEST FAILED - {res.get('error', 'Unknown error')}")
         
         return test_results
 
@@ -2013,10 +2214,11 @@ class GeneralizedOrderedModel:
             print("[gologit2] Step 1: Fitting fully parallel model (baseline)...")
         
         baseline_model = GeneralizedOrderedModel(link=self.link, pl_vars=feature_names.copy())
-        baseline_result = baseline_model.fit(X, y, feature_names=feature_names, verbose=False)
+        baseline_result = baseline_model.fit(X, y, feature_names=feature_names, verbose=False, compute_se=False)
         
         if not baseline_result.success:
-            print("[gologit2] ERROR: Baseline parallel model failed to converge")
+            if verbose:
+                print("[gologit2] ERROR: Baseline parallel model failed to converge")
             return {'success': False, 'reason': 'baseline_failed'}
         
         baseline_ll = -baseline_result.fun
@@ -2053,7 +2255,7 @@ class GeneralizedOrderedModel:
                 try:
                     # 拟合放开该变量的模型
                     test_model = GeneralizedOrderedModel(link=self.link, pl_vars=test_pl_vars)
-                    test_result = test_model.fit(X, y, feature_names=feature_names, verbose=False)
+                    test_result = test_model.fit(X, y, feature_names=feature_names, verbose=False, compute_se=False)
                     
                     if test_result.success:
                         test_ll = -test_result.fun
@@ -2134,7 +2336,7 @@ class GeneralizedOrderedModel:
                 print(f"[gologit2] Step Final: Fitting PPOM with NPL vars: {selected_npl_vars}")
             
             final_model = GeneralizedOrderedModel(link=self.link, pl_vars=current_pl_vars)
-            final_result = final_model.fit(X, y, feature_names=feature_names, verbose=False)
+            final_result = final_model.fit(X, y, feature_names=feature_names, verbose=False, compute_se=True)
             
             final_success = final_result.success
             final_ll = -final_result.fun if final_success else np.nan

@@ -1,0 +1,21 @@
+country,model_type,variable,threshold,threshold_readable,coefficient,std_error,p_value,significant_05,significant_01
+us,Full_Model,internationalization_Multinational,cut1,Junior→Assistant,0.18899149286300285,0.0,0.0,True,True
+us,Full_Model,internationalization_Multinational,cut2,Assistant→Regular,0.4249016093134086,0.0,0.0,True,True
+us,Full_Model,internationalization_Multinational,cut3,Regular→Senior,0.1511256643773757,0.0,0.0,True,True
+us,Full_Model,internationalization_Multinational,cut4,Senior→Leader,0.11295095860305394,0.0,0.0,True,True
+us,Full_Model,internationalization_Multinational,cut5,Leader→Chief/founder,-0.612795027319418,0.0,0.0,True,True
+us,Full_Model,internationalization_International,cut1,Junior→Assistant,0.2743987883253617,0.0,0.0,True,True
+us,Full_Model,internationalization_International,cut2,Assistant→Regular,-0.08080096489023321,0.0,0.0,True,True
+us,Full_Model,internationalization_International,cut3,Regular→Senior,0.06366556791202009,0.0,0.0,True,True
+us,Full_Model,internationalization_International,cut4,Senior→Leader,-0.1737962288156858,0.0,0.0,True,True
+us,Full_Model,internationalization_International,cut5,Leader→Chief/founder,-0.4531754464684743,0.0,0.0,True,True
+india,Full_Model,highest_educational_degree_Advanced Degree,cut1,Junior→Assistant,0.057989902949387724,0.0,0.0,True,True
+india,Full_Model,highest_educational_degree_Advanced Degree,cut2,Assistant→Regular,0.2034266777747764,0.0,0.0,True,True
+india,Full_Model,highest_educational_degree_Advanced Degree,cut3,Regular→Senior,0.2062748272673073,0.0,0.0,True,True
+india,Full_Model,highest_educational_degree_Advanced Degree,cut4,Senior→Leader,0.03835372756080626,0.0,0.0,True,True
+india,Full_Model,highest_educational_degree_Advanced Degree,cut5,Leader→Chief/founder,0.04703482021967106,0.0,0.0,True,True
+india,Full_Model,internationalization_International,cut1,Junior→Assistant,0.13651046403386166,0.0,0.0,True,True
+india,Full_Model,internationalization_International,cut2,Assistant→Regular,0.17531920023978062,0.0,0.0,True,True
+india,Full_Model,internationalization_International,cut3,Regular→Senior,-0.1455045340659811,0.0,0.0,True,True
+india,Full_Model,internationalization_International,cut4,Senior→Leader,-0.17950412244714542,0.0,0.0,True,True
+india,Full_Model,internationalization_International,cut5,Leader→Chief/founder,-0.019348215264870145,0.0,0.0,True,True

@@ -259,6 +259,139 @@ class Gologit2Result:
             params["beta_npl_by_equation"] = by_eq
         return params
 
+    def coef_by_threshold(self, var_name: str):
+        """
+        返回K-1个门槛上的系数β_j(var)，索引为cut1..cut(K-1)。
+        若变量是parallel，则每个门槛同一个值；若是non-parallel，则取对应列。
+        
+        Parameters:
+            var_name: 变量名
+            
+        Returns:
+            pd.Series: 各门槛的系数，索引为cut1, cut2, ..., cutK-1
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError("pandas is required for coef_by_threshold method")
+        
+        K = len(self.alphas)  # 门槛个数 
+        
+        # 构造非平行变量名列表
+        npl_vars = [n for n in self.feature_names if self.pl_vars is None or n not in self.pl_vars]
+        
+        if var_name in npl_vars and self.beta_npl is not None:
+            # 非平行变量：从beta_npl矩阵中获取
+            var_idx = npl_vars.index(var_name)
+            coefs = self.beta_npl[:, var_idx]
+        elif self.pl_vars and var_name in self.pl_vars and self.beta_pl is not None:
+            # 平行变量：所有门槛相同系数
+            var_idx = self.pl_vars.index(var_name)
+            coefs = np.repeat(self.beta_pl[var_idx], K)
+        else:
+            raise KeyError(f"Variable '{var_name}' not found in model variables.")
+        
+        cuts = [f"cut{j}" for j in range(1, K + 1)]
+        return pd.Series(coefs, index=cuts, name=var_name)
+
+    def dPr_ge_by_threshold(self, X: np.ndarray, var_name: str, dx: Optional[float] = None):
+        """
+        数值导数：对每个门槛j，计算∂Pr(Y>=j)/∂x_var的样本平均。
+        
+        Parameters:
+            X: 设计矩阵 (n_samples, n_features)
+            var_name: 变量名
+            dx: 数值差分步长（若为None，自动选择：标准化变量用1.0，其他用1e-4）
+            
+        Returns:
+            pd.Series: 各门槛的阈值概率效应，索引为cut1, cut2, ..., cutK-1
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError("pandas is required for dPr_ge_by_threshold method")
+        
+        # 找变量在X中的列位置
+        if var_name not in self.feature_names:
+            raise KeyError(f"Variable '{var_name}' not found in feature_names")
+        col_idx = self.feature_names.index(var_name)
+        
+        # 自动选择合适的步长：对标准化变量使用dx=1.0（对齐+1SD），其他用小步长
+        if dx is None:
+            dx = 1.0 if var_name.endswith('_z') else 1e-4
+        
+        # 需要创建临时模型实例进行预测
+        temp_model = GeneralizedOrderedModel(link="logit")  # 临时实例
+        temp_model.categories_ = self.categories
+        temp_model.feature_names_ = self.feature_names
+        temp_model._result = self
+        
+        # 基准预测
+        P = temp_model.predict_proba(X)  # (n, M)
+        # 计算累积概率 Pr(Y>=j)
+        P_ge = np.fliplr(np.cumsum(np.fliplr(P), axis=1))  # (n,M)
+        
+        # 扰动预测
+        X_plus = X.copy()
+        X_plus[:, col_idx] += dx
+        P_plus = temp_model.predict_proba(X_plus)
+        P_ge_plus = np.fliplr(np.cumsum(np.fliplr(P_plus), axis=1))
+        
+        # 数值导数
+        dP_ge = (P_ge_plus - P_ge) / dx  # (n,M)
+        
+        # 只取门槛1..K-1（最后一列是Pr(Y>=M)对应最高类别）
+        K = len(self.alphas)  # 门槛数
+        avg_effects = dP_ge[:, :K].mean(axis=0)
+        
+        cuts = [f"cut{j}" for j in range(1, K + 1)]
+        return pd.Series(avg_effects, index=cuts, name=f"dPr(Y>=cut)/d{var_name}")
+
+    def dPr_cat_by_threshold(self, X: np.ndarray, var_name: str, dx: Optional[float] = None):
+        """
+        数值导数：对每个类别c，计算∂Pr(Y=c)/∂x_var的样本平均。
+        
+        Parameters:
+            X: 设计矩阵 (n_samples, n_features)
+            var_name: 变量名
+            dx: 数值差分步长（若为None，自动选择：标准化变量用1.0，其他用1e-4）
+            
+        Returns:
+            pd.Series: 各类别的概率效应，索引为Y=0, Y=1, ..., Y=M-1
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError("pandas is required for dPr_cat_by_threshold method")
+        
+        # 找变量在X中的列位置
+        if var_name not in self.feature_names:
+            raise KeyError(f"Variable '{var_name}' not found in feature_names")
+        col_idx = self.feature_names.index(var_name)
+        
+        # 自动选择合适的步长：对标准化变量使用dx=1.0（对齐+1SD），其他用小步长
+        if dx is None:
+            dx = 1.0 if var_name.endswith('_z') else 1e-4
+        
+        # 创建临时模型实例
+        temp_model = GeneralizedOrderedModel(link="logit")
+        temp_model.categories_ = self.categories
+        temp_model.feature_names_ = self.feature_names  
+        temp_model._result = self
+        
+        # 基准和扰动预测
+        P = temp_model.predict_proba(X)  # (n,M)
+        X_plus = X.copy()
+        X_plus[:, col_idx] += dx
+        P_plus = temp_model.predict_proba(X_plus)
+        
+        # 数值导数
+        dP = (P_plus - P) / dx  # (n,M)
+        avg_effects = dP.mean(axis=0)
+        
+        cats = [f"Y={c}" for c in self.categories]
+        return pd.Series(avg_effects, index=cats, name=f"dPr(Y=c)/d{var_name}")
+
     def summary(self) -> str:
         """Return a formatted summary of the fitted model results."""
         lines = []
@@ -569,13 +702,13 @@ class GeneralizedOrderedModel:
             # Cumulative probabilities F_j per threshold j
             F = _cumprob_from_xb(xb, self.link)  # shape (K, n)
             
-            # SOFT CHECK: Ensure F is monotonic with penalty instead of hard rejection
+            # SOFT CHECK: Ensure F is monotonic with reduced penalty for better curvature
             penalty = 0.0
             if K > 1:
                 f_diffs = np.diff(F, axis=0)  # F_{j+1} - F_j for all j
                 violations = np.maximum(0, -f_diffs)  # negative diffs are violations
                 if np.any(violations > 0):
-                    penalty += 1e8 * np.sum(violations ** 2)  # quadratic penalty
+                    penalty += 1e6 * np.sum(violations ** 2)  # 降低罚项强度避免扭曲Hessian
             
             # Category probabilities p(y = category_k)
             # k = 0 (lowest): F1
@@ -587,10 +720,10 @@ class GeneralizedOrderedModel:
                 p_cat[k_idx, :] = F[k_idx, :] - F[k_idx - 1, :]
             p_cat[M - 1, :] = 1.0 - F[K - 1, :]
             
-            # SOFT CHECK: Penalize negative probabilities instead of hard rejection
+            # SOFT CHECK: Penalize negative probabilities with reduced penalty
             neg_prob_violations = np.maximum(0, -p_cat)  # negative probs are violations
             if np.any(neg_prob_violations > 0):
-                penalty += 1e8 * np.sum(neg_prob_violations ** 2)  # quadratic penalty
+                penalty += 1e6 * np.sum(neg_prob_violations ** 2)  # 降低罚项强度
 
             # Select the probability for the observed category
             obs_prob = p_cat[y_idx, np.arange(n)]
@@ -679,12 +812,17 @@ class GeneralizedOrderedModel:
             hess_inv=hess_inv,
         )
         
-        # 计算标准误、p值和pseudo R2
-        result = self._compute_statistics(X_np, y_np, result)
-
-        # Save fitted state on the model
+        # 关键修复：先保存基本拟合状态，再计算统计量
         self.categories_ = categories
         self.feature_names_ = names
+        self.pl_vars_ = list(pl_vars) if pl_vars else None
+        self.npl_vars_ = [names[i] for i in range(len(names)) if not pl_mask[i]] if p_npl > 0 else None
+        self._result = result  # 设置基本result，供统计量计算使用
+        
+        # 计算标准误、p值和pseudo R2（现在_result已设置）
+        result = self._compute_statistics(X_np, y_np, result)
+        
+        # 更新完整的result对象
         self._result = result
 
         # Comprehensive diagnostic check on training set
@@ -697,15 +835,19 @@ class GeneralizedOrderedModel:
 
         return result
 
-    def predict_proba(self, X: Union[np.ndarray, Any]) -> np.ndarray:
+    def predict_proba(self, X: Union[np.ndarray, Any], strict: bool = False) -> np.ndarray:
         """Predict category probabilities for each row of X.
+
+        Parameters:
+        - X: feature matrix for prediction
+        - strict: if True, raise error when negative probabilities/non-monotonic F detected;
+                  if False, clip negative values to 0 and renormalize (default)
 
         Returns an array of shape (n_samples, n_categories).
         
-        Note: This method applies safety guardrails (clip negative values to 0 
-        and renormalize) to ensure valid probability distributions. This differs 
-        from the strict infeasibility checks during training. For raw probabilities 
-        without guardrails (for diagnostics), use _predict_proba_raw().
+        Note: This method applies safety guardrails by default (clip negative values 
+        to 0 and renormalize) to ensure valid probability distributions. For diagnostics
+        or to detect boundary cases, use strict=True or _predict_proba_raw().
         """
         if self._result is None:
             raise RuntimeError("Model is not fitted. Call fit() first.")
@@ -762,7 +904,21 @@ class GeneralizedOrderedModel:
             p_cat[k_idx, :] = F[k_idx, :] - F[k_idx - 1, :]
         p_cat[M - 1, :] = 1.0 - F[K - 1, :]
 
-        # Final safety guardrails: ensure non-negative probabilities and normalization
+        # Check for boundary violations before applying guardrails
+        has_negative_prob = np.any(p_cat < -1e-12)
+        has_non_monotonic_F = K > 1 and np.any(np.diff(F, axis=0) < -1e-12)
+        
+        if strict and (has_negative_prob or has_non_monotonic_F):
+            error_details = []
+            if has_negative_prob:
+                min_prob = np.min(p_cat)
+                error_details.append(f"negative probabilities detected (min={min_prob:.6e})")
+            if has_non_monotonic_F:
+                min_diff = np.min(np.diff(F, axis=0))
+                error_details.append(f"non-monotonic cumulative probabilities (min_diff={min_diff:.6e})")
+            raise ValueError(f"Model prediction violates feasibility constraints: {'; '.join(error_details)}")
+        
+        # Apply safety guardrails: ensure non-negative probabilities and normalization
         p_cat = np.maximum(p_cat, 0.0)  # clip negative values to 0
         row_sums = p_cat.sum(axis=0, keepdims=True)
         p_cat = p_cat / np.maximum(row_sums, 1e-12)  # normalize each row to sum to 1
@@ -934,6 +1090,224 @@ class GeneralizedOrderedModel:
         p_cat[M - 1, :] = 1.0 - F[K - 1, :]
 
         return p_cat.T  # (n, M)
+
+    def compute_score_contributions(self, X: np.ndarray, y: np.ndarray,
+                                  result: Optional[Gologit2Result] = None) -> Optional[np.ndarray]:
+        """计算每个观测的得分贡献 s_i = ∇ℓ_i，用于稳健标准误计算
+        
+        Returns:
+            (n, p) array where s_i is the score contribution of observation i
+            返回None如果计算失败
+        """
+        res = result if result is not None else self._result
+        if res is None:
+            return None
+            
+        try:
+            n, p = X.shape
+            K = len(res.alphas)  # number of thresholds
+            M = K + 1  # number of categories
+            
+            # 参数向量: [alphas, beta_pl, beta_npl.flatten()]
+            total_params = K
+            if res.beta_pl is not None:
+                total_params += len(res.beta_pl)
+            if res.beta_npl is not None:
+                total_params += res.beta_npl.size
+                
+            scores = np.zeros((n, total_params))
+            
+            # 使用complex-step数值导数计算每个观测的得分
+            h = 1e-8  # complex step size
+            
+            def single_obs_nll(params_vec, obs_idx):
+                """单个观测的负对数似然"""
+                # 解包参数
+                alphas = params_vec[:K]
+                param_idx = K
+                
+                beta_pl = None
+                if res.beta_pl is not None:
+                    p_pl = len(res.beta_pl)
+                    beta_pl = params_vec[param_idx:param_idx + p_pl]
+                    param_idx += p_pl
+                    
+                beta_npl = None
+                if res.beta_npl is not None:
+                    beta_npl = params_vec[param_idx:].reshape(res.beta_npl.shape)
+                
+                # 单个观测的数据
+                X_obs = X[obs_idx:obs_idx+1]  # (1, p)
+                y_obs = y[obs_idx]
+                
+                # 计算线性预测子
+                xb = alphas.reshape(-1, 1)  # (K, 1)
+                
+                if beta_pl is not None and res.pl_vars:
+                    pl_indices = [i for i, name in enumerate(res.feature_names) if name in res.pl_vars]
+                    if pl_indices:
+                        X_pl = X_obs[:, pl_indices]  # (1, p_pl)
+                        xb = xb - (beta_pl.reshape(1, -1) @ X_pl.T)  # (K, 1)
+                
+                if beta_npl is not None:
+                    npl_indices = [i for i, name in enumerate(res.feature_names) 
+                                 if res.pl_vars is None or name not in res.pl_vars]
+                    if npl_indices:
+                        X_npl = X_obs[:, npl_indices]  # (1, p_npl)
+                        xb = xb - (beta_npl @ X_npl.T)  # (K, 1)
+                
+                # 计算概率
+                F = _cumprob_from_xb(xb.reshape(K, 1), res.link).flatten()
+                
+                # 计算类别概率
+                probs = np.zeros(M)
+                probs[0] = F[0]
+                for k in range(1, K):
+                    probs[k] = F[k] - F[k-1]
+                probs[M-1] = 1.0 - F[K-1]
+                
+                # 避免数值问题
+                probs = np.clip(probs, 1e-12, 1.0)
+                probs = probs / probs.sum()  # 重归一化
+                
+                # 负对数似然
+                return -np.log(probs[y_obs])
+            
+            # 计算每个参数的得分 (对每个观测)
+            current_params = np.zeros(total_params)
+            current_params[:K] = res.alphas
+            param_idx = K
+            
+            if res.beta_pl is not None:
+                p_pl = len(res.beta_pl)
+                current_params[param_idx:param_idx + p_pl] = res.beta_pl
+                param_idx += p_pl
+                
+            if res.beta_npl is not None:
+                current_params[param_idx:] = res.beta_npl.flatten()
+            
+            # 对每个观测计算得分向量
+            for i in range(n):
+                for j in range(total_params):
+                    # Complex-step derivative
+                    params_complex = current_params.astype(complex)
+                    params_complex[j] += 1j * h
+                    
+                    # 计算复数步的似然
+                    nll_complex = single_obs_nll(params_complex, i)
+                    
+                    # 得分 = -∂ℓ/∂θ = ∂(-ℓ)/∂θ
+                    scores[i, j] = np.imag(nll_complex) / h
+                    
+            return scores
+            
+        except Exception as e:
+            print(f"[gologit2] Warning: Failed to compute score contributions: {e}")
+            return None
+
+    def compute_sandwich_se(self, X: np.ndarray, y: np.ndarray,
+                           result: Optional[Gologit2Result] = None,
+                           cluster_var: Optional[np.ndarray] = None) -> Optional[dict]:
+        """计算Sandwich稳健标准误 V = H^-1 B H^-1
+        
+        Parameters:
+            cluster_var: (n,) array of cluster identifiers for cluster-robust SE
+        """
+        res = result if result is not None else self._result
+        if res is None:
+            return None
+            
+        try:
+            # 1. 计算Hessian
+            hessian_result = self.compute_numerical_hessian(X, y, result, method="3-point")
+            if hessian_result is None or 'hessian_inv' not in hessian_result:
+                return None
+                
+            H_inv = hessian_result['hessian_inv']
+            
+            # 2. 计算得分贡献
+            scores = self.compute_score_contributions(X, y, result)
+            if scores is None:
+                return None
+            
+            # 3. 计算B矩阵 (Outer Product of Gradients)
+            if cluster_var is not None:
+                # Cluster-robust: 按cluster求和得分
+                unique_clusters = np.unique(cluster_var)
+                cluster_scores = []
+                for cluster in unique_clusters:
+                    mask = cluster_var == cluster
+                    cluster_score = scores[mask].sum(axis=0)  # 该cluster的总得分
+                    cluster_scores.append(cluster_score)
+                scores_for_B = np.array(cluster_scores)  # (n_clusters, p)
+            else:
+                # Individual-level
+                scores_for_B = scores  # (n, p)
+            
+            # B = Σ s_i s_i'  
+            B = scores_for_B.T @ scores_for_B  # (p, p)
+            
+            # 4. Sandwich估计: V = H^-1 B H^-1
+            try:
+                V_sandwich = H_inv @ B @ H_inv
+                se_sandwich = np.sqrt(np.diag(V_sandwich))
+                
+                return {
+                    'V_sandwich': V_sandwich,
+                    'se_sandwich': se_sandwich,
+                    'method': 'sandwich_hc0' if cluster_var is None else 'sandwich_cluster'
+                }
+            except np.linalg.LinAlgError:
+                print("[gologit2] Warning: Sandwich covariance computation failed")
+                return None
+                
+        except Exception as e:
+            print(f"[gologit2] Warning: Sandwich SE computation failed: {e}")
+            return None
+
+    def compute_bhhh_se(self, X: np.ndarray, y: np.ndarray,
+                       result: Optional[Gologit2Result] = None) -> Optional[dict]:
+        """计算BHHH标准误: V = B^-1, where B = Σ s_i s_i'
+        
+        BHHH估计直接用得分外积的逆作为协方差矩阵估计
+        """
+        res = result if result is not None else self._result
+        if res is None:
+            return None
+            
+        try:
+            # 计算得分贡献
+            scores = self.compute_score_contributions(X, y, result)
+            if scores is None:
+                return None
+            
+            # BHHH矩阵: B = Σ s_i s_i'
+            B = scores.T @ scores  # (p, p)
+            
+            # 协方差矩阵: V = B^-1
+            try:
+                V_bhhh = np.linalg.inv(B)
+                se_bhhh = np.sqrt(np.diag(V_bhhh))
+                
+                return {
+                    'V_bhhh': V_bhhh,
+                    'se_bhhh': se_bhhh,
+                    'method': 'bhhh'
+                }
+            except np.linalg.LinAlgError:
+                # 尝试伪逆
+                V_bhhh = np.linalg.pinv(B)
+                se_bhhh = np.sqrt(np.maximum(0, np.diag(V_bhhh)))  # 确保非负
+                
+                return {
+                    'V_bhhh': V_bhhh,
+                    'se_bhhh': se_bhhh,
+                    'method': 'bhhh_pinv'
+                }
+                
+        except Exception as e:
+            print(f"[gologit2] Warning: BHHH SE computation failed: {e}")
+            return None
 
     def compute_numerical_hessian(self, X: np.ndarray, y: np.ndarray, 
                                    result: Optional[Gologit2Result] = None, 
@@ -1165,8 +1539,31 @@ class GeneralizedOrderedModel:
                 print("[gologit2] Warning: Could not compute null model likelihood.")
                 print("[gologit2] Pseudo R² statistics unavailable (likely due to sparse categories).")
             
-            # 3. 计算标准误和p值
+            # 3. 计算标准误和p值 - 使用多种稳健方法
+            print("[gologit2] Computing numerical Hessian (this may take a moment)...")
             hessian_result = self.compute_numerical_hessian(X, y, result, method="3-point")
+            
+            # 尝试多种稳健标准误方法
+            robust_methods = {}
+            
+            # 方法1: Sandwich (HC0)
+            try:
+                sandwich_result = self.compute_sandwich_se(X, y, result, cluster_var=None)
+                if sandwich_result is not None:
+                    robust_methods['sandwich'] = sandwich_result
+            except Exception as e:
+                print(f"[gologit2] Sandwich SE computation failed: {e}")
+            
+            # 方法2: BHHH
+            try:
+                bhhh_result = self.compute_bhhh_se(X, y, result)
+                if bhhh_result is not None:
+                    robust_methods['bhhh'] = bhhh_result
+            except Exception as e:
+                print(f"[gologit2] BHHH SE computation failed: {e}")
+            
+            # 存储稳健标准误结果供诊断使用
+            result.robust_se_methods = robust_methods
             
             if hessian_result is not None:
                 cov_matrix = hessian_result["cov_matrix"]
@@ -1444,31 +1841,331 @@ class GeneralizedOrderedModel:
         return se_estimates
 
     def test_parallel_lines(self, X: np.ndarray, y: np.ndarray, 
-                           variables: Optional[List[str]] = None) -> dict:
-        """Perform Wald tests for parallel lines assumption on specified variables.
+                           variables: Optional[List[str]] = None,
+                           method: str = "lr") -> dict:
+        """Perform tests for parallel lines assumption on specified variables.
         
-        This is a simplified version of gologit2's autofit functionality.
-        Tests whether coefficients for each variable are the same across equations.
+        This tests whether coefficients for each variable are the same across equations.
+        
+        Parameters:
+        - X: feature matrix used during fitting
+        - y: response vector used during fitting  
+        - variables: variables to test (if None, test all non-parallel variables)
+        - method: 'lr' for likelihood ratio test (recommended), 'wald' for Wald test
         
         Returns dict with test statistics and p-values for each variable.
         """
         if self._result is None:
             raise RuntimeError("Model is not fitted. Call fit() first.")
         
-        if self._result.beta_npl is None:
-            print("[gologit2] No non-parallel variables to test.")
+        result = self._result
+        feature_names = result.feature_names
+        categories = result.categories
+        K = len(result.alphas)  # number of thresholds
+        
+        # Convert y to category indices
+        cat_to_index = {c: i for i, c in enumerate(categories)}
+        y_idx = np.vectorize(cat_to_index.get)(y)
+        
+        # Determine variables to test
+        if variables is None:
+            # Test all currently non-parallel variables
+            if result.pl_vars is None:
+                variables = feature_names  # All variables are non-parallel
+            else:
+                variables = [v for v in feature_names if v not in result.pl_vars]
+        else:
+            # Filter to variables actually in the model
+            variables = [v for v in variables if v in feature_names]
+        
+        if not variables:
+            print("[gologit2] No variables to test for parallel lines assumption.")
             return {}
         
-        # For now, return a placeholder - full implementation would require
-        # computing the covariance matrix and Wald statistics
-        print("[gologit2] Parallel lines testing not yet fully implemented.")
-        print("[gologit2] This would require:")
-        print("  1. Robust covariance matrix estimation")
-        print("  2. Wald test statistics for coefficient equality across equations")
-        print("  3. Chi-square p-values for each variable")
-        print("[gologit2] Consider using autofit-style stepwise selection manually.")
+        print(f"[gologit2] Testing parallel lines assumption for {len(variables)} variables using {method.upper()} method...")
         
-        return {}
+        test_results = {}
+        
+        for var in variables:
+            try:
+                # Get current parallel-lines variables (excluding the test variable)
+                current_pl_vars = list(result.pl_vars) if result.pl_vars else []
+                if var in current_pl_vars:
+                    # Variable is currently parallel, test if it should be non-parallel
+                    restricted_pl_vars = current_pl_vars.copy()
+                    unrestricted_pl_vars = [v for v in current_pl_vars if v != var]
+                else:
+                    # Variable is currently non-parallel, test if it could be parallel
+                    restricted_pl_vars = list(current_pl_vars) + [var] if result.pl_vars else [var]
+                    unrestricted_pl_vars = current_pl_vars.copy()
+                
+                if method.lower() == "lr":
+                    # Likelihood Ratio Test
+                    
+                    # Fit restricted model (null hypothesis: parallel lines)
+                    restricted_model = GeneralizedOrderedModel(link=result.link, pl_vars=restricted_pl_vars)
+                    restricted_result = restricted_model.fit(X, y, feature_names=feature_names, verbose=False, maxiter=2000)
+                    
+                    # Fit unrestricted model (alternative: non-parallel)
+                    unrestricted_model = GeneralizedOrderedModel(link=result.link, pl_vars=unrestricted_pl_vars)
+                    unrestricted_result = unrestricted_model.fit(X, y, feature_names=feature_names, verbose=False, maxiter=2000)
+                    
+                    if restricted_result.success and unrestricted_result.success:
+                        # Calculate LR statistic
+                        ll_restricted = -restricted_result.fun
+                        ll_unrestricted = -unrestricted_result.fun
+                        lr_stat = 2 * (ll_unrestricted - ll_restricted)
+                        
+                        # Degrees of freedom: difference in number of parameters
+                        # Moving from parallel to non-parallel adds (K-2) parameters
+                        # (one parallel coef becomes K non-parallel coefs, net gain = K-1)
+                        df = K - 2  # Conservative: K-1 equations, but lose 1 parameter
+                        
+                        # P-value from chi-square distribution
+                        from scipy.stats import chi2
+                        p_value = 1 - chi2.cdf(max(0, lr_stat), df)
+                        
+                        test_results[var] = {
+                            'method': 'LR',
+                            'statistic': lr_stat,
+                            'p_value': p_value,
+                            'df': df,
+                            'll_restricted': ll_restricted,
+                            'll_unrestricted': ll_unrestricted,
+                            'reject_parallel': p_value < 0.05,
+                            'success': True
+                        }
+                    else:
+                        test_results[var] = {
+                            'method': 'LR',
+                            'statistic': np.nan,
+                            'p_value': np.nan,
+                            'df': K - 2,
+                            'success': False,
+                            'error': 'Model fitting failed'
+                        }
+                        
+                elif method.lower() == "wald":
+                    # Wald test (requires covariance matrix)
+                    print(f"[gologit2] Wald test not yet implemented for variable {var}")
+                    test_results[var] = {
+                        'method': 'Wald',
+                        'statistic': np.nan,
+                        'p_value': np.nan,
+                        'success': False,
+                        'error': 'Wald test not implemented'
+                    }
+                else:
+                    raise ValueError(f"Unknown test method: {method}")
+                    
+            except Exception as e:
+                test_results[var] = {
+                    'method': method.upper(),
+                    'statistic': np.nan,
+                    'p_value': np.nan,
+                    'success': False,
+                    'error': str(e)
+                }
+                print(f"[gologit2] Error testing variable {var}: {e}")
+        
+        # Print summary
+        print("[gologit2] Parallel lines test results:")
+        for var, res in test_results.items():
+            if res['success']:
+                status = "REJECT parallel" if res.get('reject_parallel', False) else "ACCEPT parallel"
+                print(f"  {var}: {res['method']} = {res['statistic']:.3f}, p = {res['p_value']:.4f} -> {status}")
+            else:
+                print(f"  {var}: TEST FAILED - {res.get('error', 'Unknown error')}")
+        
+        return test_results
+
+    def autofit_variable_selection(self, X: np.ndarray, y: np.ndarray, 
+                                  feature_names: List[str],
+                                  candidate_vars: Optional[List[str]] = None,
+                                  significance_level: float = 0.01,
+                                  max_npl_vars: int = 5,
+                                  verbose: bool = True) -> dict:
+        """自动变量选择：从全并行开始，逐步放开违反比例优势假设的变量
+        
+        实现部分平行有序模型(PPOM)的变量选择策略
+        
+        Parameters:
+            candidate_vars: 候选非平行变量列表，如果为None则考虑所有变量
+            significance_level: LR检验的显著性水平
+            max_npl_vars: 最多允许的非平行变量数
+            verbose: 是否输出详细过程
+        
+        Returns:
+            dict: 包含选择过程和最终结果的详细信息
+        """
+        if candidate_vars is None:
+            candidate_vars = feature_names.copy()
+        
+        # 移除已知应该parallel的变量（如年份dummy等）
+        candidate_vars = [v for v in candidate_vars if v in feature_names]
+        
+        if verbose:
+            print(f"[gologit2] Starting automatic variable selection...")
+            print(f"[gologit2] Candidate variables: {candidate_vars}")
+        
+        # Step 1: 拟合全并行模型作为baseline
+        if verbose:
+            print("[gologit2] Step 1: Fitting fully parallel model (baseline)...")
+        
+        baseline_model = GeneralizedOrderedModel(link=self.link, pl_vars=feature_names.copy())
+        baseline_result = baseline_model.fit(X, y, feature_names=feature_names, verbose=False)
+        
+        if not baseline_result.success:
+            print("[gologit2] ERROR: Baseline parallel model failed to converge")
+            return {'success': False, 'reason': 'baseline_failed'}
+        
+        baseline_ll = -baseline_result.fun
+        selection_log = []
+        
+        if verbose:
+            print(f"[gologit2] Baseline model LL: {baseline_ll:.4f}")
+        
+        # Step 2: 逐个测试候选变量
+        selected_npl_vars = []
+        current_pl_vars = feature_names.copy()
+        current_ll = baseline_ll
+        
+        K = len(baseline_result.alphas)  # number of thresholds
+        
+        for iteration in range(max_npl_vars):
+            if verbose:
+                print(f"[gologit2] Step {iteration + 2}: Testing remaining candidates...")
+            
+            # 测试每个剩余候选变量
+            remaining_candidates = [v for v in candidate_vars if v not in selected_npl_vars]
+            if not remaining_candidates:
+                break
+            
+            best_var = None
+            best_ll = current_ll
+            best_lr_stat = 0
+            best_p_value = 1.0
+            
+            for var in remaining_candidates:
+                # 构造新的pl_vars列表（移除当前测试变量）
+                test_pl_vars = [v for v in current_pl_vars if v != var]
+                
+                try:
+                    # 拟合放开该变量的模型
+                    test_model = GeneralizedOrderedModel(link=self.link, pl_vars=test_pl_vars)
+                    test_result = test_model.fit(X, y, feature_names=feature_names, verbose=False)
+                    
+                    if test_result.success:
+                        test_ll = -test_result.fun
+                        
+                        # LR检验统计量
+                        lr_stat = 2 * (test_ll - current_ll)
+                        # 自由度：从1个并行系数变成K-1个非平行系数，增加了K-2个参数
+                        df = K - 2
+                        p_value = 1 - stats.chi2.cdf(lr_stat, df) if lr_stat > 0 else 1.0
+                        
+                        if verbose:
+                            print(f"[gologit2]   {var}: LL={test_ll:.4f}, LR={lr_stat:.2f}, p={p_value:.4f}")
+                        
+                        # 记录测试结果
+                        selection_log.append({
+                            'iteration': iteration + 1,
+                            'variable': var,
+                            'll_baseline': current_ll,
+                            'll_test': test_ll,
+                            'lr_stat': lr_stat,
+                            'p_value': p_value,
+                            'df': df,
+                            'selected': p_value < significance_level
+                        })
+                        
+                        # 更新最佳候选
+                        if p_value < significance_level and lr_stat > best_lr_stat:
+                            best_var = var
+                            best_ll = test_ll
+                            best_lr_stat = lr_stat
+                            best_p_value = p_value
+                    else:
+                        if verbose:
+                            print(f"[gologit2]   {var}: Model failed to converge")
+                        selection_log.append({
+                            'iteration': iteration + 1,
+                            'variable': var,
+                            'll_baseline': current_ll,
+                            'll_test': np.nan,
+                            'lr_stat': np.nan,
+                            'p_value': np.nan,
+                            'df': K - 2,
+                            'selected': False,
+                            'note': 'convergence_failed'
+                        })
+                        
+                except Exception as e:
+                    if verbose:
+                        print(f"[gologit2]   {var}: Error during fitting: {e}")
+                    selection_log.append({
+                        'iteration': iteration + 1,
+                        'variable': var,
+                        'll_baseline': current_ll,
+                        'll_test': np.nan,
+                        'lr_stat': np.nan,
+                        'p_value': np.nan,
+                        'df': K - 2,
+                        'selected': False,
+                        'note': f'error: {str(e)}'
+                    })
+            
+            # 如果找到显著变量，将其加入非平行集合
+            if best_var is not None:
+                selected_npl_vars.append(best_var)
+                current_pl_vars.remove(best_var)
+                current_ll = best_ll
+                
+                if verbose:
+                    print(f"[gologit2] -> Selected {best_var} (p={best_p_value:.4f})")
+            else:
+                if verbose:
+                    print("[gologit2] -> No more significant variables found")
+                break
+        
+        # Step 3: 拟合最终模型
+        if selected_npl_vars:
+            if verbose:
+                print(f"[gologit2] Step Final: Fitting PPOM with NPL vars: {selected_npl_vars}")
+            
+            final_model = GeneralizedOrderedModel(link=self.link, pl_vars=current_pl_vars)
+            final_result = final_model.fit(X, y, feature_names=feature_names, verbose=False)
+            
+            final_success = final_result.success
+            final_ll = -final_result.fun if final_success else np.nan
+        else:
+            # 没有选中任何变量，保持全并行
+            if verbose:
+                print("[gologit2] Step Final: No variables selected, keeping fully parallel model")
+            
+            final_model = baseline_model
+            final_result = baseline_result
+            final_success = True
+            final_ll = baseline_ll
+        
+        # 返回完整的选择结果
+        return {
+            'success': final_success,
+            'selected_npl_vars': selected_npl_vars,
+            'final_pl_vars': current_pl_vars,
+            'baseline_ll': baseline_ll,
+            'final_ll': final_ll,
+            'improvement': final_ll - baseline_ll if not np.isnan(final_ll) else 0,
+            'selection_log': selection_log,
+            'final_model': final_model,
+            'final_result': final_result if final_success else None,
+            'parameters': {
+                'significance_level': significance_level,
+                'max_npl_vars': max_npl_vars,
+                'n_candidates': len(candidate_vars),
+                'n_iterations': len(selected_npl_vars) + 1
+            }
+        }
 
 
 __all__ = [

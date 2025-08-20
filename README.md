@@ -32,11 +32,13 @@
 <td width="50%">
 
 ### <strong>Core Features</strong>
-- Bayesian OQR: `OR1` (J≥4) and `OR2` (J=3), translated and optimized from R `bqror`
-- Panel OQR: year fixed effects and gender×year interactions
-- Frequentist OQR (TORQUE): single/two-index approximations with interval prediction
-- Utilities: posterior summaries, DIC, marginal likelihood, covariate effects
-- Clean, minimal APIs focused on practical workflows
+- **Generalized Ordered Logit**: Python implementation of Stata's `gologit2` with robust inference
+- **Bayesian OQR**: `OR1` (J≥4) and `OR2` (J=3), translated and optimized from R `bqror`
+- **Panel OQR**: year fixed effects and gender×year interactions
+- **Frequentist OQR (TORQUE)**: single/two-index approximations with interval prediction
+- **Brant Test**: proportional odds assumption testing for ordered models
+- **Utilities**: posterior summaries, DIC, marginal likelihood, covariate effects
+- **Clean, minimal APIs** focused on practical workflows
 
 </td>
 <td width="50%">
@@ -58,8 +60,9 @@ See the in-repo guides:
 - `tutorial_ordinal_quantile_regression.md` — end-to-end OQR tutorial
 - `tutorial_panel_oqr.md` — panel OQR with time trends and comparisons
 - Module docs:
-  - `glm_plus/ordinal_quantile_regression/README.md`
-  - `glm_plus/frequentist/README.md`
+  - `glm_plus/gologit2/README.md` — generalized ordered logit models (Stata gologit2 equivalent)
+  - `glm_plus/ordinal_quantile_regression/README.md` — Bayesian and frequentist OQR
+  - `glm_plus/brant_test/` — proportional odds assumption testing
 
 ---
 
@@ -84,7 +87,13 @@ See the in-repo guides:
 
 ## About
 
-GLM Plus provides ordinal quantile regression in both Bayesian and frequentist flavors, with panel-data helpers and clear Python APIs. It aims to be practical and fast while staying close to the underlying methodology.
+GLM Plus provides comprehensive tools for ordinal outcome modeling in Python, including:
+- **Generalized ordered logit models** (equivalent to Stata's gologit2) with robust statistical inference
+- **Ordinal quantile regression** in both Bayesian and frequentist flavors
+- **Model diagnostics** including Brant tests for proportional odds assumptions
+- **Panel-data helpers** and clear Python APIs
+
+It aims to be practical and numerically stable while staying close to established methodology.
 
 <div align="center">
   <table>
@@ -112,17 +121,24 @@ glm_plus/
 │   └── logo/
 │       └── logo.png
 ├── glm_plus/
-│   ├── ordinal_quantile_regression/
-│   │   ├── ori.py        # OR1 (J≥4)
-│   │   ├── orii.py       # OR2 (J=3)
-│   │   ├── panel_oqr.py  # Panel helpers
+│   ├── gologit2/
+│   │   ├── gologit2.py   # Generalized ordered logit models
 │   │   └── README.md
-│   └── frequentist/
-│       ├── torque.py     # TORQUE implementation
-│       └── README.md
-├── bqror_r_package/      # Reference R package and data
+│   ├── brant_test/
+│   │   ├── brant_test.py # Proportional odds assumption testing
+│   ├── ordinal_quantile_regression/
+│   │   ├── bayesian_version/
+│   │   │   ├── ori.py        # OR1 (J≥4)
+│   │   │   ├── orii.py       # OR2 (J=3)
+│   │   │   ├── panel_oqr.py  # Panel helpers
+│   │   │   └── README.md
+│   │   └── frequentist_version/
+│   │       ├── torque.py     # TORQUE implementation
+│   │       └── README.md
 ├── tests/
-│   └── seniority.ipynb   # Example notebook
+│   ├── seniority/        # Seniority analysis examples
+│   ├── frequentist.ipynb # OQR examples
+│   └── seniority.ipynb   # Panel analysis
 ├── tutorial_ordinal_quantile_regression.md
 └── tutorial_panel_oqr.md
 ```
@@ -152,7 +168,36 @@ export PYTHONPATH="$(pwd):$PYTHONPATH"
 
 ## Usage
 
-### OR1 (J≥4) example
+### Generalized Ordered Logit (gologit2) example
+```python
+import numpy as np
+from glm_plus.gologit2 import GeneralizedOrderedModel
+
+# Generate sample data
+np.random.seed(42)
+n = 1000
+X = np.random.randn(n, 3)
+linear = X @ np.array([0.8, -0.5, 1.2])
+y = np.ones(n)
+y[linear > -0.5] = 2
+y[linear > 0.5] = 3
+y[linear > 1.5] = 4
+
+# Fit model with mixed constraints
+model = GeneralizedOrderedModel(
+    link="logit", 
+    pl_vars=["x1"]  # x1 has same effect across thresholds
+)
+result = model.fit(X, y, feature_names=["x1", "x2", "x3"])
+
+# View results with standard errors and p-values
+print(result.summary())
+
+# Make predictions
+probs = model.predict_proba(X[:10])
+```
+
+### Ordinal Quantile Regression: OR1 (J≥4) example
 ```python
 import numpy as np
 from glm_plus.ordinal_quantile_regression.ori import quantregOR1
@@ -202,11 +247,17 @@ lo, hi = model.predict_interval(X[:5], 0.25, 0.75)
 
 ## FAQ
 
-**Why ordinal quantile regression?** Quantiles reveal distributional effects beyond the mean, which is useful for ordered outcomes.
+**When to use gologit2 vs OQR?** Use **gologit2** for standard ordered logit with relaxed proportional odds assumptions. Use **OQR** when you want to model quantile effects (distributional impacts beyond the mean).
 
-**Which model should I pick?** Use `OR2` for J=3; use `OR1` for J≥4. The frequentist TORQUE implementation provides a practical alternative.
+**Which OQR model should I pick?** Use `OR2` for J=3; use `OR1` for J≥4. The frequentist TORQUE implementation provides a practical alternative for larger datasets.
 
-**Performance?** The Python code includes vectorized latent sampling and optional parallelism. See module READMEs for details.
+**How does gologit2 compare to Stata?** Our implementation provides equivalent results with some improvements: robust numerical methods, comprehensive diagnostics, and automatic handling of edge cases. Parameter interpretations are identical, but cutpoint signs may differ (clearly documented).
+
+**Performance considerations?** 
+- **gologit2**: Optimized for reliability over speed; includes comprehensive diagnostics
+- **OQR**: Vectorized latent sampling with optional parallelism for Bayesian methods
+
+See module READMEs for detailed performance notes and optimization tips.
 
 ## Contributing
 

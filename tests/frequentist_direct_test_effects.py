@@ -14,7 +14,7 @@ except Exception:
 _PROJECT_ROOT = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), '..'))
 if _PROJECT_ROOT not in _sys.path:
     _sys.path.insert(0, _PROJECT_ROOT)
-from glm_plus.frequentist.torque import FrequentistOQR
+from glm_plus.frequentist_version.torque import FrequentistOQR
 from matplotlib import pyplot as plt
 
 # ==================== 常量与配置 ====================

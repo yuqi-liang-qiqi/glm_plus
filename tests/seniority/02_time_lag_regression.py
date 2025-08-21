@@ -111,7 +111,8 @@ print(f"时间滞后数据集: {len(lag_df)} 行 (从 {len(work)} 行创建)")
 
 if len(lag_df) == 0:
     print("❌ 没有找到连续年份的数据，无法创建滞后数据集")
-    exit()
+    import sys
+    sys.exit(1)
 
 # 对关键解释变量 rarity_score 做 z-score 标准化（按国家分组），以便跨国比较（每 +1 SD）
 def _zscore_series(s: pd.Series) -> pd.Series:
@@ -195,8 +196,12 @@ def compute_ordered_marginal_effects(model_obj, X_df, var_name, seniority_levels
             raise ValueError(f"变量 {var_name} 不在设计矩阵中")
 
         # 判断是否二元变量（0/1）
-        col = pd.Series(pd.unique(X_s[var_name].dropna()))
-        is_binary = set(np.sort(col.values)) <= {0, 1}
+        uniq = pd.unique(X_s[var_name].dropna())
+        try:
+            uniq = uniq.astype(float)
+        except Exception:
+            uniq = uniq
+        is_binary = set(np.sort(uniq)) <= {0.0, 1.0}
 
         if is_binary:
             # 离散变化：将该列整体从0切换到1，计算概率差的样本平均
@@ -223,28 +228,31 @@ def compute_ordered_marginal_effects(model_obj, X_df, var_name, seniority_levels
             }
 
         else:
-            # 连续变量：数值导数近似
+            # 连续变量：中心差分（更稳健）
             # 对标准化变量（如rarity_score_z）使用dx=1.0来对齐"+1 SD"解释
             if var_name.endswith('_z'):
                 dx = 1.0  # 标准化变量，1单位 = 1 SD
             else:
                 dx = 1e-4  # 其他连续变量使用小步长数值导数
-            
+
+            half = dx / 2.0
             X_plus = X_s.copy()
-            X_plus[var_name] = X_plus[var_name].astype(float) + dx
+            X_minus = X_s.copy()
+            X_plus[var_name] = X_plus[var_name].astype(float) + half
+            X_minus[var_name] = X_minus[var_name].astype(float) - half
 
             # 使用自定义gologit2的predict_proba方法预测概率矩阵
-            P = model_obj.predict_proba(X_s)      # shape: (n_samples, n_categories) 
             P_plus = model_obj.predict_proba(X_plus)
+            P_minus = model_obj.predict_proba(X_minus)
 
-            # 平均偏效应
-            dP = (P_plus - P) / dx
+            # 平均偏效应（中心差分）
+            dP = (P_plus - P_minus) / dx
             ape = dP.mean(axis=0)
 
             J = len(seniority_levels)
             ape = np.asarray(ape).reshape(-1)[:J]
 
-            dx_desc = 'per+1SD' if dx == 1.0 else f'dx={dx}'
+            dx_desc = 'per+1SD (central)' if dx == 1.0 else f'central_dx={dx}'
             return {
                 'levels': seniority_levels,
                 'effects': ape,
@@ -311,19 +319,19 @@ def compute_ame_expected(model_obj, X_df, var_name):
             ame = float((Ey1 - Ey0).mean())
             return ame, 'discrete_0to1'
         else:
-            # 对标准化变量（如rarity_score_z）使用dx=1.0来对齐"+1 SD"解释
+            # 中心差分：更稳健的连续变量 AME
             if var_name.endswith('_z'):
-                dx = 1.0  # 标准化变量，1单位 = 1 SD
+                dx = 1.0
             else:
-                dx = 1e-4  # 其他连续变量使用小步长数值导数
-            
-            X_plus = X_s.copy()
-            X_plus[var_name] = X_plus[var_name].astype(float) + dx
-            Ey = expected_y(X_s)
+                dx = 1e-4
+            half = dx / 2.0
+            X_plus = X_s.copy(); X_minus = X_s.copy()
+            X_plus[var_name] = X_plus[var_name].astype(float) + half
+            X_minus[var_name] = X_minus[var_name].astype(float) - half
             Ey_plus = expected_y(X_plus)
-            ame = float(((Ey_plus - Ey) / dx).mean())
-            
-            method_desc = f'per+1SD' if dx == 1.0 else f'derivative_dx={dx}'
+            Ey_minus = expected_y(X_minus)
+            ame = float(((Ey_plus - Ey_minus) / dx).mean())
+            method_desc = 'per+1SD (central)' if dx == 1.0 else f'central_dx={dx}'
             return ame, method_desc
     except Exception as e:
         return np.nan, f'error: {e}'
@@ -553,7 +561,7 @@ for ctry in countries:
                 max_npl = 2  # 限制最多2个非平行变量，提升速度
                 improvement_log = []
                 K = len(baseline_res.alphas)
-                print(f"  {ctry}: PPOM前向选择设置: alpha={alpha}, 自由度df=K-2={K-2} (K=类别-1={K})")
+                print(f"  {ctry}: PPOM前向选择设置: alpha={alpha}, 自由度df=K-1={K-1} (K=类别-1={K})")
                 
                 while len(npl_now) < max_npl and cands:
                     print(f"  {ctry}: 测试候选变量: {cands}")
@@ -603,7 +611,7 @@ for ctry in countries:
                 print(f"  {ctry}: 快速选择完成")
                 print(f"  {ctry}: 最终平行变量 (n={len(final_pl_vars)}): {final_pl_vars}")
                 print(f"  {ctry}: 最终非平行变量 (n={len(final_npl_vars)}): {final_npl_vars}")
-                print(f"  {ctry}: alpha={alpha} (PPOM选择阈值)，df=K-2={K-2}")
+                print(f"  {ctry}: alpha={alpha} (PPOM选择阈值)，df=K-1={K-1}")
 
                 # 3) 用选好的结构拟合"最终模型"，计算SE/边际效应
                 print(f"  {ctry}: 拟合最终模型（含SE计算）...")
@@ -623,14 +631,14 @@ for ctry in countries:
                     'success': res.success,
                     'alpha': alpha,
                     'K': K,
-                    'df_used': K - 2
+                    'df_used': K - 1
                 }
                 
                 # 更新后续使用的变量
                 pl_vars = final_pl_vars
                 non_parallel_vars = final_npl_vars
             
-            print(f"  {ctry}: 模型拟合完成：success={res.success}, nit={res.nit if hasattr(res, 'nit') else 'N/A'}")
+            print(f"  {ctry}: 模型拟合完成：success={res.success}, nit={getattr(res, 'n_iter', 'N/A')}")
             print(f"  {ctry}: 使用的聚类变量已对齐（长度={len(cluster)}，唯一簇={len(pd.unique(cluster))}）")
 
             
@@ -764,6 +772,21 @@ for ctry in countries:
             if not np.isnan(ame_rarity):
                 success_msg += f", AME(E[Y])={ame_rarity:.4f} per +1SD"
             print(success_msg)
+
+            # 符号自检：+1SD 的期望值变化（快速 Sanity Check）
+            try:
+                Xsan = X_final.sample(n=min(2000, len(X_final)), random_state=1) if len(X_final) > 0 else X_final
+                if len(Xsan) > 0:
+                    P0 = model.predict_proba(Xsan)
+                    X1 = Xsan.copy()
+                    if 'rarity_score_z' in X1.columns:
+                        X1['rarity_score_z'] = X1['rarity_score_z'].astype(float) + 1.0
+                        P1 = model.predict_proba(X1)
+                        levels = np.arange(P0.shape[1])
+                        dEy = float(((P1 @ levels) - (P0 @ levels)).mean())
+                        print(f"  [{ctry}] Sanity dE[Y] per +1SD = {dEy:.6f}")
+            except Exception:
+                pass
             
             # === 计算每个变量对各类别概率的 APE（边际效应） ===
             seniority_levels = seniority_order  # 使用实际的级别名称
@@ -958,7 +981,7 @@ for ctry in countries:
                     if test_res_simple.success:
                         lr_stat_simple = 2 * (test_ll_simple - baseline_ll_simple)
                         K_simple = len(baseline_res_simple.alphas)
-                        df_simple = K_simple - 2  # 简化：一个变量从parallel(1参数)变non-parallel(K-1参数)，净增K-2参数
+                        df_simple = K_simple - 1  # 简化：parallel(1) -> non-parallel(K) 增量 K-1
                         p_value_simple = 1 - stats.chi2.cdf(max(0, lr_stat_simple), df_simple) if lr_stat_simple > 0 else 1.0
                         
                         print(f"  {ctry}: 简化模型LR检验: ΔLL={test_ll_simple-baseline_ll_simple:.3f}, LR={lr_stat_simple:.2f}, p={p_value_simple:.4f}")

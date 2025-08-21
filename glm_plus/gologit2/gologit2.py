@@ -327,8 +327,8 @@ class Gologit2Result:
         if dx is None:
             dx = 1.0 if var_name.endswith('_z') else 1e-4
         
-        # 需要创建临时模型实例进行预测
-        temp_model = GeneralizedOrderedModel(link="logit")  # 临时实例
+        # 需要创建临时模型实例进行预测（继承当前链接函数）
+        temp_model = GeneralizedOrderedModel(link=self.link)  # 临时实例
         temp_model.categories_ = self.categories
         temp_model.feature_names_ = self.feature_names
         temp_model._result = self
@@ -380,8 +380,8 @@ class Gologit2Result:
         if dx is None:
             dx = 1.0 if var_name.endswith('_z') else 1e-4
         
-        # 创建临时模型实例
-        temp_model = GeneralizedOrderedModel(link="logit")
+        # 创建临时模型实例（继承当前链接函数）
+        temp_model = GeneralizedOrderedModel(link=self.link)
         temp_model.categories_ = self.categories
         temp_model.feature_names_ = self.feature_names  
         temp_model._result = self

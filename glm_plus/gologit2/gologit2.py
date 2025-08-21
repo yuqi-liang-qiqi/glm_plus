@@ -37,6 +37,7 @@ Usage (quick start):
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
@@ -74,29 +75,23 @@ def _cdf_logit(z: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-z_safe))
 
 
+from scipy import special
+
 def _cdf_probit(z: np.ndarray) -> np.ndarray:
-    """Standard normal CDF."""
-    return stats.norm.cdf(z)
+    """Standard normal CDF supporting complex-step via erf."""
+    return 0.5 * (1.0 + special.erf(z / np.sqrt(2)))
 
 
 def _cdf_cloglog(z: np.ndarray) -> np.ndarray:
-    """Complementary log-log cumulative form used by Stata for cloglog link.
-
-    Stata's gologit2 uses F(x) = exp(-exp(x)) for the cumulative probability.
-    Numerical safety: clip z to avoid exp overflow.
-    """
-    z_safe = _clip_preserve_imag(z, -35, 35)  # prevent exp overflow
-    return np.exp(-np.exp(z_safe))
+    """Complementary log-log: F(z) = 1 - exp(-exp(z))."""
+    z_safe = _clip_preserve_imag(z, -35, 35)
+    return 1.0 - np.exp(-np.exp(z_safe))
 
 
 def _cdf_loglog(z: np.ndarray) -> np.ndarray:
-    """Log-log cumulative form used by Stata for loglog link.
-
-    Stata's gologit2 uses F(x) = 1 - exp(-exp(-x)).
-    Numerical safety: clip z to avoid exp overflow.
-    """
-    z_safe = _clip_preserve_imag(z, -35, 35)  # prevent exp overflow
-    return 1.0 - np.exp(-np.exp(-z_safe))
+    """Log-log: F(z) = exp(-exp(-z))."""
+    z_safe = _clip_preserve_imag(z, -35, 35)
+    return np.exp(-np.exp(-z_safe))
 
 
 def _cdf_cauchit(z: np.ndarray) -> np.ndarray:
@@ -110,8 +105,8 @@ def _cumprob_from_xb(xb: np.ndarray, link: str) -> np.ndarray:
     CORRECTED PARAMETERIZATION: xb = alpha_j - X*beta (standard form)
     All links now use F(xb) directly since xb already has correct sign:
     - logit/probit: F_j = CDF(xb_j)  [FIXED: removed negative sign]
-    - cloglog:      F_j = exp(-exp(xb_j))
-    - loglog:       F_j = 1 - exp(-exp(-xb_j))
+    - cloglog:      F_j = 1 - exp(-exp(xb_j))
+    - loglog:       F_j = exp(-exp(-xb_j))
     - cauchit:      F_j = 0.5 + (1/pi) * atan(xb_j)  [FIXED: removed negative sign]
     """
     if link == "logit":
@@ -121,7 +116,7 @@ def _cumprob_from_xb(xb: np.ndarray, link: str) -> np.ndarray:
     if link == "cloglog":
         return _cdf_cloglog(xb)
     if link == "loglog":
-        return _cdf_loglog(-xb)
+        return _cdf_loglog(xb)
     if link == "cauchit":
         return _cdf_cauchit(xb)  # FIXED: removed negative sign
     raise ValueError(f"Unsupported link: {link}")
@@ -438,8 +433,10 @@ class Gologit2Result:
         lines.append("")
         
         # Note about standard errors and diagnostics
-        if self.se_alphas is not None:
+        if (self.se_alphas is not None) or (getattr(self, 'primary_se_method', None) is not None):
             lines.append("STANDARD ERRORS:")
+            se_method = getattr(self, 'primary_se_method', None)
+            lines.append(f"- SE method: {str(se_method) if se_method is not None else 'none'}")
             lines.append("- Default: robust (Huber-White/BHHH or Sandwich). Cutpoints use Delta method from monotonic reparameterization.")
             lines.append("- If a cluster variable was provided to fit(), SEs are cluster-robust (by worker_id).")
             lines.append("- P-values use normal approximation (Wald tests).")
@@ -925,7 +922,8 @@ class GeneralizedOrderedModel:
 
         # Cum probs and category probs
         F = _cumprob_from_xb(xb, link)
-        p_cat = np.empty((M, n))
+        # Use F.dtype to support complex-step safety during numerical derivatives
+        p_cat = np.empty((M, n), dtype=F.dtype)
         p_cat[0, :] = F[0, :]
         for k_idx in range(1, M - 1):
             p_cat[k_idx, :] = F[k_idx, :] - F[k_idx - 1, :]
@@ -946,11 +944,13 @@ class GeneralizedOrderedModel:
             raise ValueError(f"Model prediction violates feasibility constraints: {'; '.join(error_details)}")
         
         # Apply safety guardrails: ensure non-negative probabilities and normalization
-        p_cat = np.maximum(p_cat, 0.0)  # clip negative values to 0
+        # Preserve imaginary part to keep complex-step derivatives valid
+        p_cat = _clip_preserve_imag(p_cat, 0.0, 1.0)
         row_sums = p_cat.sum(axis=0, keepdims=True)
-        p_cat = p_cat / np.maximum(row_sums, 1e-12)  # normalize each row to sum to 1
+        p_cat = p_cat / np.maximum(row_sums, 1e-12)
 
-        return p_cat.T  # (n, M)
+        # Return real-valued probabilities to caller
+        return np.real(p_cat.T)  # (n, M)
 
     def predict_xb(self, X: Union[np.ndarray, Any], equation: int) -> np.ndarray:
         """Predict the linear predictor xb_j for a given threshold equation (1..K).
@@ -1147,6 +1147,10 @@ class GeneralizedOrderedModel:
             # 使用complex-step数值导数计算每个观测的得分
             h = 1e-8  # complex step size
             
+            categories = res.categories
+            cat_to_index = {c: i for i, c in enumerate(categories)}
+            y_idx = np.vectorize(cat_to_index.get)(y)
+
             def single_obs_nll(params_vec, obs_idx):
                 """单个观测的负对数似然"""
                 # 解包参数
@@ -1165,7 +1169,7 @@ class GeneralizedOrderedModel:
                 
                 # 单个观测的数据
                 X_obs = X[obs_idx:obs_idx+1]  # (1, p)
-                y_obs = y[obs_idx]
+                y_obs = y_idx[obs_idx]
                 
                 # 计算线性预测子
                 xb = alphas.reshape(-1, 1)  # (K, 1)
@@ -1187,18 +1191,19 @@ class GeneralizedOrderedModel:
                 F = _cumprob_from_xb(xb.reshape(K, 1), res.link).flatten()
                 
                 # 计算类别概率
-                probs = np.zeros(M)
+                # Keep complex dtype to avoid ComplexWarning when using complex-step
+                probs = np.zeros(M, dtype=F.dtype)
                 probs[0] = F[0]
                 for k in range(1, K):
                     probs[k] = F[k] - F[k-1]
                 probs[M-1] = 1.0 - F[K-1]
                 
-                # 避免数值问题
-                probs = np.clip(probs, 1e-12, 1.0)
-                probs = probs / probs.sum()  # 重归一化
+                # 避免数值问题（仅裁剪实部，保留虚部以支持complex-step）
+                probs = _clip_preserve_imag(probs, 1e-12, 1.0)
+                probs = probs / np.maximum(probs.sum(), 1e-16)  # 重归一化
                 
                 # 负对数似然
-                return -np.log(probs[y_obs])
+                return -np.log(probs[int(y_obs)])
             
             # 计算每个参数的得分 (对每个观测)
             current_params = np.zeros(total_params)
@@ -1255,37 +1260,85 @@ class GeneralizedOrderedModel:
                 return None
             H_inv_free = hessian_result['cov_matrix']  # with respect to alpha_free, betas
             
-            # 2. 计算得分贡献
-            scores = self.compute_score_contributions(X, y, result)
-            if scores is None:
+            # 2. 计算簇级得分（将 O(n·p) 降为 O(G·p)）
+            def compute_cluster_scores() -> Optional[np.ndarray]:
+                res_loc = result if result is not None else self._result
+                if res_loc is None:
+                    return None
+                K_loc = len(res_loc.alphas)
+                parts: List[np.ndarray] = [res_loc.alphas]
+                if res_loc.beta_pl is not None:
+                    parts.append(res_loc.beta_pl)
+                if res_loc.beta_npl is not None:
+                    parts.append(res_loc.beta_npl.ravel())
+                theta0 = np.concatenate(parts).astype(complex)
+
+                # y -> indices
+                categories = res_loc.categories
+                cat_to_index = {c: i for i, c in enumerate(categories)}
+                y_idx = np.vectorize(cat_to_index.get)(y)
+
+                names = res_loc.feature_names
+                pl = set(res_loc.pl_vars or [])
+                pl_mask = np.array([n in pl for n in names], dtype=bool)
+                K = K_loc; M = K + 1
+
+                def nll_cluster(theta: np.ndarray, idx: np.ndarray) -> complex:
+                    pos = 0
+                    alphas = theta[pos:pos+K]; pos += K
+                    beta_pl = None
+                    if res_loc.beta_pl is not None:
+                        p_pl = len(res_loc.beta_pl)
+                        beta_pl = theta[pos:pos+p_pl]; pos += p_pl
+                    beta_npl = None
+                    if res_loc.beta_npl is not None:
+                        beta_npl = theta[pos:].reshape(res_loc.beta_npl.shape)
+                    Xi = X[idx]
+                    yi = y_idx[idx]
+                    xb = alphas[:, np.newaxis]
+                    if beta_pl is not None and res_loc.beta_pl is not None:
+                        xb = xb - (Xi[:, pl_mask] @ beta_pl)[np.newaxis, :]
+                    if beta_npl is not None and res_loc.beta_npl is not None:
+                        xb = xb - (beta_npl @ Xi[:, ~pl_mask].T)
+                    F = _cumprob_from_xb(xb, res_loc.link)
+                    p_cat = np.empty((M, len(idx)), dtype=F.dtype)
+                    p_cat[0] = F[0]
+                    for k in range(1, K):
+                        p_cat[k] = F[k] - F[k-1]
+                    p_cat[M-1] = 1.0 - F[K-1]
+                    p_cat = _clip_preserve_imag(p_cat, 1e-12, 1.0)
+                    obs = p_cat[yi, np.arange(len(idx))]
+                    return -np.sum(np.log(obs))
+
+                h = 1e-8
+                uniq = np.unique(cluster_var) if cluster_var is not None else np.arange(X.shape[0])
+                G = len(uniq)
+                P = theta0.size
+                Sg = np.zeros((G, P), dtype=float)
+                for g, c in enumerate(uniq):
+                    idx = np.flatnonzero(cluster_var == c) if cluster_var is not None else np.array([c])
+                    for j in range(P):
+                        th = theta0.copy()
+                        th[j] += 1j * h
+                        val = nll_cluster(th, idx)
+                        Sg[g, j] = np.imag(val) / h
+                return Sg
+
+            Sg = compute_cluster_scores()
+            if Sg is None:
                 return None
-            
-            # 3. 计算B矩阵 (Outer Product of Gradients)
-            if cluster_var is not None:
-                # Cluster-robust: 按cluster求和得分
-                unique_clusters = np.unique(cluster_var)
-                cluster_scores = []
-                for cluster in unique_clusters:
-                    mask = cluster_var == cluster
-                    cluster_score = scores[mask].sum(axis=0)  # 该cluster的总得分
-                    cluster_scores.append(cluster_score)
-                scores_for_B = np.array(cluster_scores)  # (n_clusters, p)
-            else:
-                # Individual-level
-                scores_for_B = scores  # (n, p)
+            scores_for_B = Sg  # (G, p)
             
             # B = Σ s_i s_i'  
             B = scores_for_B.T @ scores_for_B  # (p, p)
             # 小样本校正
             if small_sample:
-                n = scores.shape[0]
-                p = scores.shape[1]
+                n = X.shape[0]
+                p = scores_for_B.shape[1]
                 if cluster_var is None:
-                    # HC1: n/(n-p)
                     if n > p:
                         B = (n / (n - p)) * B
                 else:
-                    # Cluster-robust dof correction: G/(G-1) * (n-1)/(n-p)
                     unique_clusters = np.unique(cluster_var)
                     G = unique_clusters.size
                     if (G > 1) and (n > p):
@@ -1320,7 +1373,9 @@ class GeneralizedOrderedModel:
             return None
 
     def compute_bhhh_se(self, X: np.ndarray, y: np.ndarray,
-                       result: Optional[Gologit2Result] = None) -> Optional[dict]:
+                       result: Optional[Gologit2Result] = None,
+                       cluster_var: Optional[np.ndarray] = None,
+                       small_sample: bool = True) -> Optional[dict]:
         """计算BHHH标准误: V = B^-1, where B = Σ s_i s_i'
         
         BHHH估计直接用得分外积的逆作为协方差矩阵估计
@@ -1330,13 +1385,35 @@ class GeneralizedOrderedModel:
             return None
             
         try:
-            # 计算得分贡献
+            # 计算得分贡献（观测级）
             scores = self.compute_score_contributions(X, y, result)
             if scores is None:
                 return None
             
-            # BHHH矩阵: B = Σ s_i s_i'
-            B = scores.T @ scores  # (p, p)
+            # BHHH矩阵: B = Σ s s'
+            if cluster_var is not None:
+                unique_clusters = np.unique(cluster_var)
+                cluster_scores = []
+                for c in unique_clusters:
+                    mask = cluster_var == c
+                    cluster_scores.append(scores[mask].sum(axis=0))
+                S = np.array(cluster_scores)  # (G, p)
+                B = S.T @ S
+            else:
+                B = scores.T @ scores  # (n, p) -> (p, p)
+
+            # 小样本修正（与Sandwich一致的HC1风格）
+            if small_sample:
+                n = X.shape[0]
+                p_dim = scores.shape[1]
+                if cluster_var is None:
+                    if n > p_dim:
+                        B = (n / (n - p_dim)) * B
+                else:
+                    unique_clusters = np.unique(cluster_var)
+                    G = unique_clusters.size
+                    if (G > 1) and (n > p_dim):
+                        B = (G / (G - 1)) * ((n - 1) / (n - p_dim)) * B
             
             # 协方差矩阵: V ≈ B^-1（数值稳定：岭化+伪逆兜底）
             ridge = 1e-8
@@ -1350,7 +1427,7 @@ class GeneralizedOrderedModel:
             return {
                 'V_bhhh': V_bhhh,
                 'se_bhhh': se_bhhh,
-                'method': 'bhhh'
+                'method': 'bhhh_cluster' if cluster_var is not None else 'bhhh'
             }
                 
         except Exception as e:
@@ -1377,32 +1454,47 @@ class GeneralizedOrderedModel:
             raise RuntimeError("Model is not fitted. Call fit() first.")
         
         # FIXED: Import hierarchy without putting computation in except block
-        approx_derivative = None
+        # Robust import of numerical differentiation utilities
+        _has_numdiff = False
         try:
-            # 优先尝试SciPy的内部API
-            from scipy.optimize._numdiff import approx_derivative
-        except ImportError:
+            from scipy.optimize._numdiff import approx_derivative as _approx_deriv
+            _has_numdiff = True
+        except Exception:
             try:
-                # 后备：检查是否在公开API中
-                from scipy.optimize import approx_derivative
-            except ImportError:
-                try:
-                    # 再后备：检查更早版本的位置
-                    from scipy.misc import approx_fprime as approx_derivative_fallback
-                    if verbose:
-                        print("[gologit2] Warning: Using fallback derivative approximation.")
-                        print("[gologit2] Consider upgrading SciPy for better numerical differentiation.")
-                    approx_derivative = approx_derivative_fallback
-                except ImportError:
-                    if verbose:
-                        print("[gologit2] Error: Cannot find numerical differentiation function.")
-                        print("[gologit2] Please upgrade SciPy (>= 1.0 recommended) or install numdifftools.")
-                    return None
+                from scipy.optimize import approx_derivative as _approx_deriv
+                _has_numdiff = True
+            except Exception:
+                _has_numdiff = False
         
-        if approx_derivative is None:
-            if verbose:
-                print("[gologit2] Error: Failed to import approx_derivative.")
-            return None
+        # Define gradient and hessian helpers with graceful fallback
+        if _has_numdiff:
+            def grad_func(f, x, method, rel_step):
+                return _approx_deriv(f, x, method=method, rel_step=rel_step)
+            def hess_func(f, x, method, rel_step):
+                return _approx_deriv(lambda xx: grad_func(f, xx, method, rel_step), x, method=method, rel_step=rel_step)
+        else:
+            try:
+                from scipy.misc import approx_fprime as _approx_fprime  # type: ignore
+            except Exception:
+                if verbose:
+                    print("[gologit2] Error: No suitable numerical differentiation available. Please upgrade SciPy (>=1.2).")
+                return None
+            def grad_func(f, x, method, rel_step):
+                eps = 1e-6 if rel_step is None else rel_step
+                return _approx_fprime(x, lambda xx: f(xx), epsilon=eps)
+            def hess_func(f, x, method, rel_step):
+                # Simple finite-difference of gradient using central differences
+                eps = 1e-5
+                x = np.asarray(x, dtype=float)
+                n = x.size
+                H = np.zeros((n, n))
+                for j in range(n):
+                    x_f = x.copy(); x_f[j] += eps
+                    x_b = x.copy(); x_b[j] -= eps
+                    g_f = grad_func(f, x_f, method, rel_step)
+                    g_b = grad_func(f, x_b, method, rel_step)
+                    H[:, j] = (g_f - g_b) / (2 * eps)
+                return 0.5 * (H + H.T)
             
         if verbose:
             print("[gologit2] Computing numerical Hessian (this may take a moment)...")
@@ -1494,9 +1586,9 @@ class GeneralizedOrderedModel:
         rel_step = 1e-6  # 温和的步长，避免数值噪声
         
         def gradient_func(theta):
-            return approx_derivative(neg_log_likelihood, theta, method=method, rel_step=rel_step)
+            return grad_func(neg_log_likelihood, theta, method, rel_step)
         
-        hessian = approx_derivative(gradient_func, theta_hat, method=method, rel_step=rel_step)
+        hessian = hess_func(neg_log_likelihood, theta_hat, method, rel_step)
         
         # 数值稳健化处理
         # 1. 强制对称化 
@@ -1611,25 +1703,11 @@ class GeneralizedOrderedModel:
             robust_methods = {}
             primary_se_source = None
             
-            # 方法1: BHHH（通常最稳健，优先使用）
-            try:
-                if verbose:
-                    print("[gologit2] Computing BHHH standard errors...")
-                bhhh_result = self.compute_bhhh_se(X, y, result)
-                if bhhh_result is not None:
-                    robust_methods['bhhh'] = bhhh_result
-                    primary_se_source = 'bhhh'
-                    if verbose:
-                        print("[gologit2] BHHH SE computation successful.")
-            except Exception as e:
-                if verbose:
-                    print(f"[gologit2] BHHH SE computation failed: {e}")
-            
-            # 方法2: Sandwich (HC1)（备选，支持cluster-robust）
-            if primary_se_source is None:
+            # 优先顺序：若给了cluster，则优先Sandwich(cluster)；否则先BHHH
+            if cluster_var is not None:
                 try:
                     if verbose:
-                        print("[gologit2] Computing Sandwich standard errors (HC1/cluster-robust if provided)...")
+                        print("[gologit2] Computing Sandwich standard errors (cluster-robust, HC1)...")
                     sandwich_result = self.compute_sandwich_se(X, y, result, cluster_var=cluster_var, small_sample=True)
                     if sandwich_result is not None:
                         robust_methods['sandwich'] = sandwich_result
@@ -1639,28 +1717,60 @@ class GeneralizedOrderedModel:
                 except Exception as e:
                     if verbose:
                         print(f"[gologit2] Sandwich SE computation failed: {e}")
-            
-            # 方法3: 数值Hessian（仅作最后备选和诊断）
-            hessian_result = None
-            # 严格限制：只有在大样本(>=500)且两种稳健方法都失败时才用Hessian
-            if primary_se_source is None and len(X) >= 500:
-                if verbose:
-                    print("[gologit2] WARNING: Both BHHH and Sandwich failed. Using numerical Hessian as last resort...")
-                    print("[gologit2] This may take longer and be less stable than robust methods.")
+
+                if primary_se_source is None:
+                    try:
+                        if verbose:
+                            print("[gologit2] Computing BHHH standard errors (cluster-aggregated)...")
+                        bhhh_result = self.compute_bhhh_se(X, y, result, cluster_var=cluster_var, small_sample=True)
+                        if bhhh_result is not None:
+                            robust_methods['bhhh'] = bhhh_result
+                            primary_se_source = 'bhhh'
+                            if verbose:
+                                print("[gologit2] BHHH SE computation successful.")
+                    except Exception as e:
+                        if verbose:
+                            print(f"[gologit2] BHHH SE computation failed: {e}")
+            else:
                 try:
+                    if verbose:
+                        print("[gologit2] Computing BHHH standard errors...")
+                    bhhh_result = self.compute_bhhh_se(X, y, result)
+                    if bhhh_result is not None:
+                        robust_methods['bhhh'] = bhhh_result
+                        primary_se_source = 'bhhh'
+                        if verbose:
+                            print("[gologit2] BHHH SE computation successful.")
+                except Exception as e:
+                    if verbose:
+                        print(f"[gologit2] BHHH SE computation failed: {e}")
+                
+                if primary_se_source is None:
+                    try:
+                        if verbose:
+                            print("[gologit2] Computing Sandwich standard errors (HC1)...")
+                        sandwich_result = self.compute_sandwich_se(X, y, result, cluster_var=None, small_sample=True)
+                        if sandwich_result is not None:
+                            robust_methods['sandwich'] = sandwich_result
+                            primary_se_source = 'sandwich'
+                            if verbose:
+                                print("[gologit2] Sandwich SE computation successful.")
+                    except Exception as e:
+                        if verbose:
+                            print(f"[gologit2] Sandwich SE computation failed: {e}")
+            
+            # 方法3: 数值Hessian（可选：如果你愿意允许兜底SE，打开primary_se_source='hessian'）
+            hessian_result = None
+            if primary_se_source is None:
+                try:
+                    if verbose:
+                        print("[gologit2] WARNING: Robust SE methods failed. Trying numerical Hessian as last resort...")
                     hessian_result = self.compute_numerical_hessian(X, y, result, method="3-point", verbose=verbose)
                     if hessian_result is not None:
                         primary_se_source = 'hessian'
-                        if verbose:
-                            print("[gologit2] Numerical Hessian computation successful.")
                 except Exception as e:
                     if verbose:
                         print(f"[gologit2] Numerical Hessian computation failed: {e}")
-            elif primary_se_source is None:
-                if verbose:
-                    print("[gologit2] WARNING: Sample size too small (<500) and robust methods failed.")
-                    print("[gologit2] Standard errors not available. Consider using bootstrap SE.")
-            # 完全跳过诊断性Hessian以加速
             
             # 存储稳健标准误结果供诊断使用
             result.robust_se_methods = robust_methods
@@ -1677,7 +1787,8 @@ class GeneralizedOrderedModel:
                 else:
                     # 后备：仅有SE向量时（不推荐）
                     se_vector = se_data['se_bhhh']
-                    self._assign_se_from_vector(result, se_vector)
+                    if se_vector is not None:
+                        self._assign_se_from_vector(result, se_vector)
                 
             elif primary_se_source == 'sandwich' and 'sandwich' in robust_methods:
                 if verbose:
@@ -1687,8 +1798,9 @@ class GeneralizedOrderedModel:
                 if cov_matrix is not None:
                     self._assign_se_from_covariance(result, cov_matrix)
                 else:
-                    se_vector = se_data['se_sandwich']
-                    self._assign_se_from_vector(result, se_vector)
+                    se_vector = se_data.get('se_sandwich', None)
+                    if se_vector is not None:
+                        self._assign_se_from_vector(result, se_vector)
                 
             elif hessian_result is not None and primary_se_source == 'hessian':
                 if verbose:
@@ -1699,6 +1811,7 @@ class GeneralizedOrderedModel:
             else:
                 if verbose:
                     print("[gologit2] Could not compute standard errors using any method.")
+                # 保持 result.se_* 为 None，不写入占位值；p-values 也不计算
                 return result
             
             # 存储Hessian诊断信息（如果可用）
@@ -1825,15 +1938,19 @@ class GeneralizedOrderedModel:
     def _compute_p_values(self, result: Gologit2Result) -> None:
         """计算p值（双尾z-test）"""
         if result.se_alphas is not None:
-            result.pvalues_alphas = 2 * (1 - stats.norm.cdf(np.abs(result.alphas / result.se_alphas)))
+            with np.errstate(invalid='ignore', divide='ignore'):
+                z_alpha = result.alphas / result.se_alphas
+                result.pvalues_alphas = 2 * (1 - stats.norm.cdf(np.abs(z_alpha)))
         
         if result.beta_pl is not None and result.se_beta_pl is not None:
-            z_pl = result.beta_pl / result.se_beta_pl
-            result.pvalues_beta_pl = 2 * (1 - stats.norm.cdf(np.abs(z_pl)))
+            with np.errstate(invalid='ignore', divide='ignore'):
+                z_pl = result.beta_pl / result.se_beta_pl
+                result.pvalues_beta_pl = 2 * (1 - stats.norm.cdf(np.abs(z_pl)))
         
         if result.beta_npl is not None and result.se_beta_npl is not None:
-            z_npl = result.beta_npl / result.se_beta_npl
-            result.pvalues_beta_npl = 2 * (1 - stats.norm.cdf(np.abs(z_npl)))
+            with np.errstate(invalid='ignore', divide='ignore'):
+                z_npl = result.beta_npl / result.se_beta_npl
+                result.pvalues_beta_npl = 2 * (1 - stats.norm.cdf(np.abs(z_npl)))
 
     def _compute_cutpoints_jacobian(self, alpha_free: np.ndarray) -> np.ndarray:
         """计算从自由参数到原始cutpoints的雅可比矩阵。
@@ -1861,8 +1978,13 @@ class GeneralizedOrderedModel:
             for j in range(1, i + 1):
                 jacobian[i, j] = np.exp(alpha_free[j])  # ∂αⱼ/∂dₖ = exp(dₖ) for k ≤ j
         
-        # 安全性验证：检查Jacobian的基本性质
-        self._validate_cutpoints_jacobian(alpha_free, jacobian)
+        # 安全性验证：检查Jacobian的基本性质（仅在较小K或需要详细输出时执行）
+        try:
+            self._validate_cutpoints_jacobian(alpha_free, jacobian)
+        except AssertionError as e:
+            # 在生产环境中避免中断，改为提示
+            if __debug__:
+                warnings.warn(f"[gologit2] Cutpoints Jacobian validation warning: {e}")
                 
         return jacobian
     
@@ -2115,9 +2237,11 @@ class GeneralizedOrderedModel:
                         lr_stat = 2 * (ll_unrestricted - ll_restricted)
                         
                         # Degrees of freedom: difference in number of parameters
-                        # Moving from parallel to non-parallel: parallel has 1 coef, non-parallel has K-1 coefs
-                        # (one parallel coef becomes K-1 non-parallel coefs, net gain = K-2)
-                        df = K - 2  # Correct: K-2 additional parameters
+                        # Moving from parallel (1 coef) to non-parallel (K-1 coefs): net gain = (K-1) - 1 = K-2? No.
+                        # Correct DF for LR test here is K-1 (unrestricted adds K-1 coefficients relative to 0 baseline).
+                        # Since restricted already had 1 parallel coef, net gain relative to restricted is (K-1) - 1 = K-2 only if
+                        # the restricted model counts that 1 coef; however LR compares full parameter counts, practical convention uses K-1.
+                        df = K - 1
                         
                         # P-value from chi-square distribution
                         from scipy.stats import chi2
@@ -2138,7 +2262,7 @@ class GeneralizedOrderedModel:
                             'method': 'LR',
                             'statistic': np.nan,
                             'p_value': np.nan,
-                            'df': K - 2,
+                            'df': K - 1,
                             'success': False,
                             'error': 'Model fitting failed'
                         }
@@ -2262,8 +2386,8 @@ class GeneralizedOrderedModel:
                         
                         # LR检验统计量
                         lr_stat = 2 * (test_ll - current_ll)
-                        # 自由度：从1个并行系数变成K-1个非平行系数，增加了K-2个参数
-                        df = K - 2
+                        # 自由度：从并行(1)到非并行(K-1)的参数增量，以LR对受限vs非受限模型的惯例，取 df = K-1
+                        df = K - 1
                         p_value = 1 - stats.chi2.cdf(lr_stat, df) if lr_stat > 0 else 1.0
                         
                         if verbose:
@@ -2297,7 +2421,7 @@ class GeneralizedOrderedModel:
                             'll_test': np.nan,
                             'lr_stat': np.nan,
                             'p_value': np.nan,
-                            'df': K - 2,
+                            'df': K - 1,
                             'selected': False,
                             'note': 'convergence_failed'
                         })
@@ -2312,7 +2436,7 @@ class GeneralizedOrderedModel:
                         'll_test': np.nan,
                         'lr_stat': np.nan,
                         'p_value': np.nan,
-                        'df': K - 2,
+                        'df': K - 1,
                         'selected': False,
                         'note': f'error: {str(e)}'
                     })

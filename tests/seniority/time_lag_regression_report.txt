@@ -1,5 +1,5 @@
 Time Lag Ordinal Regression Report
-Generated: 2025-08-20 20:37:56
+Generated: 2025-08-21 10:04:27
 
 RESEARCH QUESTION: Does t-year rarity_score predict t+1 year seniority?
 
@@ -9,6 +9,7 @@ Statistical Methods Used:
 1. Primary: Generalized Ordered Model (gologit2) with time lag
 2. Fallback: Simplified Generalized Ordered Model with essential controls only
 Note: Using custom Python implementation of gologit2 (similar to Stata's gologit2)
+
 Recommended formal run flags: --bootstrap-n 200 --bootstrap-cluster
 
 Time Lag Structure:
@@ -48,6 +49,29 @@ country       method  coef_rarity_z  se  pval  PseudoR2      N  AME_rarity_per1S
   india Gologit2_Lag            NaN NaN   NaN  0.121424 115047           0.044337
      us Gologit2_Lag            NaN NaN   NaN  0.152040 178605          -0.008480
 
+PRIMARY METRICS (for publication): AME(E[Y]) and Threshold Probability Effects with 95% CIs
+- AME(E[Y]) reported per +1 SD for rarity_score_z
+- dPr(Y≥j)/dx reported at each threshold (Junior→Assistant, ..., Leader→Chief/founder)
+- If analytic SEs are unavailable (SE=NaN), bootstrap percentile 95% CIs are used
+
+Country: us
+  AME(E[Y]) per +1 SD: -0.008480  [95% CI: analytic or N/A]
+  dPr(Y≥j)/dx by threshold:
+    cut1    0.000000
+    cut2   -0.000229
+    cut3   -0.000485
+    cut4   -0.005411
+    cut5   -0.002101
+
+Country: india
+  AME(E[Y]) per +1 SD: 0.044337  [95% CI: analytic or N/A]
+  dPr(Y≥j)/dx by threshold:
+    cut1   -0.000000
+    cut2    0.002998
+    cut3    0.003917
+    cut4    0.025170
+    cut5    0.011986
+
 Average Marginal Effects (on expected seniority, E[Y]) by Country:
 
 IMPORTANT NOTE: For gologit2 non-parallel variables, AME may differ from individual coefficients.
@@ -85,11 +109,11 @@ Country: us
 Threshold Effects Table:
               coef    dPr_ge
 threshold                   
-cut1      0.290057  0.000000
-cut2      0.290057 -0.000229
-cut3      0.290057 -0.000485
-cut4      0.290057 -0.005411
-cut5      0.290057 -0.002101
+cut1      1.132316  0.000000
+cut2      1.132316 -0.000229
+cut3      1.132316 -0.000485
+cut4      1.132316 -0.005411
+cut5      1.132316 -0.002101
 
 Category Probability Effects:
 Y=0    0.000229
@@ -100,14 +124,10 @@ Y=4   -0.001829
 Y=5   -0.000272
 
 Summary:
-[us] rarity_score_z的门槛异质性：Junior→Assistant: β≈0.290（阈值效应≈0.0000）； Assistant→Regular: β≈0.290（阈值效应≈-0.0002）； Regular→Senior: β≈0.290（阈值效应≈-0.0005）； Senior→Leader: β≈0.290（阈值效应≈-0.0054）； Leader→Chief/founder: β≈0.290（阈值效应≈-0.0021）
+[us] rarity_score_z的门槛异质性：Junior→Assistant: β≈1.132（阈值效应≈0.0000）； Assistant→Regular: β≈1.132（阈值效应≈-0.0002）； Regular→Senior: β≈1.132（阈值效应≈-0.0005）； Senior→Leader: β≈1.132（阈值效应≈-0.0054）； Leader→Chief/founder: β≈1.132（阈值效应≈-0.0021）
 
-Key Insights:
-  - Junior→Assistant: rarity facilitates this transition (β=0.290)
-  - Assistant→Regular: rarity facilitates this transition (β=0.290)
-  - Regular→Senior: rarity facilitates this transition (β=0.290)
-  - Senior→Leader: rarity facilitates this transition (β=0.290)
-  - Leader→Chief/founder: rarity facilitates this transition (β=0.290)
+Key Insights (based on dPr(Y≥j)/dx):
+  - Senior→Leader: rarity decreases Pr(Y≥j) by ≈-0.0054
 
 ----------------------------------------
 
@@ -116,11 +136,11 @@ Country: india
 Threshold Effects Table:
               coef    dPr_ge
 threshold                   
-cut1      0.430836 -0.000000
-cut2      0.430836  0.002998
-cut3      0.430836  0.003917
-cut4      0.430836  0.025170
-cut5      0.430836  0.011986
+cut1      1.057061 -0.000000
+cut2      1.057061  0.002998
+cut3      1.057061  0.003917
+cut4      1.057061  0.025170
+cut5      1.057061  0.011986
 
 Category Probability Effects:
 Y=0   -0.002998
@@ -131,14 +151,11 @@ Y=4    0.011733
 Y=5    0.000252
 
 Summary:
-[india] rarity_score_z的门槛异质性：Junior→Assistant: β≈0.431（阈值效应≈-0.0000）； Assistant→Regular: β≈0.431（阈值效应≈0.0030）； Regular→Senior: β≈0.431（阈值效应≈0.0039）； Senior→Leader: β≈0.431（阈值效应≈0.0252）； Leader→Chief/founder: β≈0.431（阈值效应≈0.0120）
+[india] rarity_score_z的门槛异质性：Junior→Assistant: β≈1.057（阈值效应≈-0.0000）； Assistant→Regular: β≈1.057（阈值效应≈0.0030）； Regular→Senior: β≈1.057（阈值效应≈0.0039）； Senior→Leader: β≈1.057（阈值效应≈0.0252）； Leader→Chief/founder: β≈1.057（阈值效应≈0.0120）
 
-Key Insights:
-  - Junior→Assistant: rarity facilitates this transition (β=0.431)
-  - Assistant→Regular: rarity facilitates this transition (β=0.431)
-  - Regular→Senior: rarity facilitates this transition (β=0.431)
-  - Senior→Leader: rarity facilitates this transition (β=0.431)
-  - Leader→Chief/founder: rarity facilitates this transition (β=0.431)
+Key Insights (based on dPr(Y≥j)/dx):
+  - Senior→Leader: rarity increases Pr(Y≥j) by ≈0.0252
+  - Leader→Chief/founder: rarity increases Pr(Y≥j) by ≈0.0120
 
 ----------------------------------------
 
@@ -171,7 +188,7 @@ McFadden's Pseudo R²: 0.1520
 Adjusted Pseudo R²: 0.1519
 
 Variable Constraints:
-  Parallel-lines (same effect across thresholds): ['whether_bachelor_university_prestigious', 'simplified_company_size_Medium (51-500 employees)', 'year_8', 'simplified_company_size_Small (11-50 employees)', 'year_7', 'simplified_company_size_Large (500+ employees)', 'year_3', 'year_2', 'rarity_score_z', 'gender_female', 'highest_educational_degree_Advanced Degree', 'year_6', 'year_9', 'year_4', 'work_years', 'year_5']
+  Parallel-lines (same effect across thresholds): ['year_2', 'simplified_company_size_Medium (51-500 employees)', 'simplified_company_size_Large (500+ employees)', 'year_9', 'work_years', 'simplified_company_size_Small (11-50 employees)', 'year_3', 'year_7', 'whether_bachelor_university_prestigious', 'year_8', 'year_5', 'year_4', 'year_6', 'gender_female', 'highest_educational_degree_Advanced Degree', 'rarity_score_z']
   Non-parallel (varying effect by threshold): ['internationalization_Multinational', 'internationalization_International']
 
 PARAMETERIZATION vs. Stata gologit2:
@@ -180,10 +197,10 @@ PARAMETERIZATION vs. Stata gologit2:
 - Only the intercept/cutpoint signs differ between implementations
 
 STANDARD ERRORS:
-- Cutpoint SEs computed using Delta method transformation from monotonic
-  reparameterization (accounts for constraint α₁ < α₂ < ... < αₖ)
-- Coefficient SEs computed from numerical Hessian at MLE
-- P-values based on asymptotic normal distribution (Wald tests)
+- SE method: bhhh
+- Default: robust (Huber-White/BHHH or Sandwich). Cutpoints use Delta method from monotonic reparameterization.
+- If a cluster variable was provided to fit(), SEs are cluster-robust (by worker_id).
+- P-values use normal approximation (Wald tests).
 
 PREDICTION vs TRAINING CONSISTENCY:
 - Training: negative probabilities trigger infeasibility (hard constraint)
@@ -194,60 +211,60 @@ Cutpoints (Intercepts):
 -----------------------------------------------------------------
                 Coef.      Std.Err         z        P>|z|
 -----------------------------------------------------------------
-  α 1      -3.537003     0.000001   -3537002.863      0.000 ***
-  α 2      -2.700646     0.000001   -2700645.756      0.000 ***
-  α 3       1.854091     0.000001   1854091.235      0.000 ***
-  α 4       3.475199     0.000001   3475199.230      0.000 ***
-  α 5       5.443628     0.000001   5443627.590      0.000 ***
+  α 1      -3.537003     0.047936    -73.786      0.000 ***
+  α 2      -2.700646     0.040650    -66.437      0.000 ***
+  α 3       1.854091     0.035803     51.785      0.000 ***
+  α 4       3.475199     0.036839     94.334      0.000 ***
+  α 5       5.443628     0.044272    122.958      0.000 ***
 
 Parallel-Lines Coefficients (same across all thresholds):
 -----------------------------------------------------------------
                 Coef.      Std.Err         z        P>|z|
 -----------------------------------------------------------------
-  whether_bachelor_university_prestigious   -0.024809     0.000000      0.000      0.000 ***
-  simplified_company_size_Medium (51-500 employees)   -0.136489     0.000000      0.000      0.000 ***
-  year_8      0.023518     0.000000      0.000      0.000 ***
-  simplified_company_size_Small (11-50 employees)    0.045113     0.000000      0.000      0.000 ***
-  year_7      0.010434     0.000000      0.000      0.000 ***
-  simplified_company_size_Large (500+ employees)    0.016907     0.000000      0.000      0.000 ***
-  year_3      0.125550     0.000000      0.000      0.000 ***
-  year_2      0.055299     0.000000      0.000      0.000 ***
-  rarity_score_z    0.290057     0.000000      0.000      0.000 ***
-  gender_female    0.473943     0.000000      0.000      0.000 ***
-  highest_educational_degree_Advanced Degree    0.644388     0.000000      0.000      0.000 ***
-  year_6      0.796236     0.000000      0.000      0.000 ***
-  year_9      0.919699     0.000000      0.000      0.000 ***
-  year_4      1.012813     0.000000      0.000      0.000 ***
-  work_years    1.091383     0.000000      0.000      0.000 ***
-  year_5      1.132316     0.000000      0.000      0.000 ***
+  year_2     -0.024809     0.004863     -5.101      0.000 ***
+  simplified_company_size_Medium (51-500 employees)   -0.136489     0.011388    -11.986      0.000 ***
+  simplified_company_size_Large (500+ employees)    0.023518     0.000684     34.378      0.000 ***
+  year_9      0.045113     0.012312      3.664      0.000 ***
+  work_years    0.010434     0.011251      0.927      0.354 
+  simplified_company_size_Small (11-50 employees)    0.016907     0.030471      0.555      0.579 
+  year_3      0.125550     0.035279      3.559      0.000 ***
+  year_7      0.055299     0.031448      1.758      0.079 
+  whether_bachelor_university_prestigious    0.290057     0.021684     13.377      0.000 ***
+  year_8      0.473943     0.021561     21.982      0.000 ***
+  year_5      0.644388     0.021392     30.123      0.000 ***
+  year_4      0.796236     0.021295     37.391      0.000 ***
+  year_6      0.919699     0.021226     43.329      0.000 ***
+  gender_female    1.012813     0.021182     47.815      0.000 ***
+  highest_educational_degree_Advanced Degree    1.091383     0.021146     51.611      0.000 ***
+  rarity_score_z    1.132316     0.021159     53.516      0.000 ***
 
 Non-Parallel Coefficients (vary by threshold):
 -----------------------------------------------------------------
   Equation 1:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    internationalization_Multinational    0.188991     0.000000      0.000      0.000 ***
-    internationalization_International    0.274399     0.000000      0.000      0.000 ***
+    internationalization_Multinational    0.188991     0.052654      3.589      0.000 ***
+    internationalization_International    0.274399     0.094513      2.903      0.004 **
   Equation 2:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    internationalization_Multinational    0.424902     0.000000      0.000      0.000 ***
-    internationalization_International   -0.080801     0.000000      0.000      0.000 ***
+    internationalization_Multinational    0.424902     0.037476     11.338      0.000 ***
+    internationalization_International   -0.080801     0.059359     -1.361      0.173 
   Equation 3:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    internationalization_Multinational    0.151126     0.000000      0.000      0.000 ***
-    internationalization_International    0.063666     0.000000      0.000      0.000 ***
+    internationalization_Multinational    0.151126     0.011129     13.580      0.000 ***
+    internationalization_International    0.063666     0.021949      2.901      0.004 **
   Equation 4:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    internationalization_Multinational    0.112951     0.000000      0.000      0.000 ***
-    internationalization_International   -0.173796     0.000000      0.000      0.000 ***
+    internationalization_Multinational    0.112951     0.017049      6.625      0.000 ***
+    internationalization_International   -0.173796     0.038995     -4.457      0.000 ***
   Equation 5:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    internationalization_Multinational   -0.612795     0.000000      0.000      0.000 ***
-    internationalization_International   -0.453175     0.000000      0.000      0.000 ***
+    internationalization_Multinational   -0.612795     0.050065    -12.240      0.000 ***
+    internationalization_International   -0.453175     0.140425     -3.227      0.001 **
 
 ======================================================================
 
@@ -451,7 +468,7 @@ McFadden's Pseudo R²: 0.1214
 Adjusted Pseudo R²: 0.1212
 
 Variable Constraints:
-  Parallel-lines (same effect across thresholds): ['whether_bachelor_university_prestigious', 'simplified_company_size_Medium (51-500 employees)', 'year_8', 'simplified_company_size_Small (11-50 employees)', 'year_7', 'simplified_company_size_Large (500+ employees)', 'year_3', 'internationalization_Multinational', 'year_2', 'rarity_score_z', 'gender_female', 'year_6', 'year_9', 'year_4', 'work_years', 'year_5']
+  Parallel-lines (same effect across thresholds): ['year_2', 'simplified_company_size_Medium (51-500 employees)', 'simplified_company_size_Large (500+ employees)', 'year_9', 'work_years', 'simplified_company_size_Small (11-50 employees)', 'year_3', 'internationalization_Multinational', 'year_7', 'whether_bachelor_university_prestigious', 'year_8', 'year_4', 'year_6', 'gender_female', 'year_5', 'rarity_score_z']
   Non-parallel (varying effect by threshold): ['highest_educational_degree_Advanced Degree', 'internationalization_International']
 
 PARAMETERIZATION vs. Stata gologit2:
@@ -460,10 +477,10 @@ PARAMETERIZATION vs. Stata gologit2:
 - Only the intercept/cutpoint signs differ between implementations
 
 STANDARD ERRORS:
-- Cutpoint SEs computed using Delta method transformation from monotonic
-  reparameterization (accounts for constraint α₁ < α₂ < ... < αₖ)
-- Coefficient SEs computed from numerical Hessian at MLE
-- P-values based on asymptotic normal distribution (Wald tests)
+- SE method: bhhh
+- Default: robust (Huber-White/BHHH or Sandwich). Cutpoints use Delta method from monotonic reparameterization.
+- If a cluster variable was provided to fit(), SEs are cluster-robust (by worker_id).
+- P-values use normal approximation (Wald tests).
 
 PREDICTION vs TRAINING CONSISTENCY:
 - Training: negative probabilities trigger infeasibility (hard constraint)
@@ -474,60 +491,60 @@ Cutpoints (Intercepts):
 -----------------------------------------------------------------
                 Coef.      Std.Err         z        P>|z|
 -----------------------------------------------------------------
-  α 1      -1.900631     0.000001   -1900631.401      0.000 ***
-  α 2      -1.583015     0.000001   -1583015.449      0.000 ***
-  α 3       1.985429     0.000001   1985429.010      0.000 ***
-  α 4       3.637244     0.000001   3637244.447      0.000 ***
-  α 5       7.843715     0.000001   7843714.935      0.000 ***
+  α 1      -1.900631     0.049928    -38.068      0.000 ***
+  α 2      -1.583015     0.048962    -32.332      0.000 ***
+  α 3       1.985429     0.047197     42.067      0.000 ***
+  α 4       3.637244     0.048564     74.896      0.000 ***
+  α 5       7.843715     0.088293     88.837      0.000 ***
 
 Parallel-Lines Coefficients (same across all thresholds):
 -----------------------------------------------------------------
                 Coef.      Std.Err         z        P>|z|
 -----------------------------------------------------------------
-  whether_bachelor_university_prestigious    0.107618     0.000000      0.000      0.000 ***
-  simplified_company_size_Medium (51-500 employees)   -0.006914     0.000000      0.000      0.000 ***
-  year_8      0.068254     0.000000      0.000      0.000 ***
-  simplified_company_size_Small (11-50 employees)   -0.070668     0.000000      0.000      0.000 ***
-  year_7     -0.040722     0.000000      0.000      0.000 ***
-  simplified_company_size_Large (500+ employees)    0.141711     0.000000      0.000      0.000 ***
-  year_3      0.189289     0.000000      0.000      0.000 ***
-  internationalization_Multinational    0.235202     0.000000      0.000      0.000 ***
-  year_2      0.155875     0.000000      0.000      0.000 ***
-  rarity_score_z    0.430836     0.000000      0.000      0.000 ***
-  gender_female    0.640789     0.000000      0.000      0.000 ***
-  year_6      0.792701     0.000000      0.000      0.000 ***
-  year_9      0.891297     0.000000      0.000      0.000 ***
-  year_4      0.965889     0.000000      0.000      0.000 ***
-  work_years    1.025079     0.000000      0.000      0.000 ***
-  year_5      1.057061     0.000000      0.000      0.000 ***
+  year_2      0.107618     0.006018     17.883      0.000 ***
+  simplified_company_size_Medium (51-500 employees)   -0.006914     0.017671     -0.391      0.696 
+  simplified_company_size_Large (500+ employees)    0.068254     0.002054     33.229      0.000 ***
+  year_9     -0.070668     0.013075     -5.405      0.000 ***
+  work_years   -0.040722     0.015908     -2.560      0.010 *
+  simplified_company_size_Small (11-50 employees)    0.141711     0.036267      3.907      0.000 ***
+  year_3      0.189289     0.040033      4.728      0.000 ***
+  internationalization_Multinational    0.235202     0.036449      6.453      0.000 ***
+  year_7      0.155875     0.026710      5.836      0.000 ***
+  whether_bachelor_university_prestigious    0.430836     0.026231     16.425      0.000 ***
+  year_8      0.640789     0.025978     24.666      0.000 ***
+  year_4      0.792701     0.025872     30.639      0.000 ***
+  year_6      0.891297     0.025802     34.543      0.000 ***
+  gender_female    0.965889     0.025726     37.546      0.000 ***
+  year_5      1.025079     0.025678     39.921      0.000 ***
+  rarity_score_z    1.057061     0.025679     41.165      0.000 ***
 
 Non-Parallel Coefficients (vary by threshold):
 -----------------------------------------------------------------
   Equation 1:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    highest_educational_degree_Advanced Degree    0.057990     0.000000      0.000      0.000 ***
-    internationalization_International    0.136510     0.000000      0.000      0.000 ***
+    highest_educational_degree_Advanced Degree    0.057990     0.045342      1.279      0.201 
+    internationalization_International    0.136510     0.054170      2.520      0.012 *
   Equation 2:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    highest_educational_degree_Advanced Degree    0.203427     0.000000      0.000      0.000 ***
-    internationalization_International    0.175319     0.000000      0.000      0.000 ***
+    highest_educational_degree_Advanced Degree    0.203427     0.042341      4.805      0.000 ***
+    internationalization_International    0.175319     0.050760      3.454      0.001 ***
   Equation 3:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    highest_educational_degree_Advanced Degree    0.206275     0.000000      0.000      0.000 ***
-    internationalization_International   -0.145505     0.000000      0.000      0.000 ***
+    highest_educational_degree_Advanced Degree    0.206275     0.015921     12.956      0.000 ***
+    internationalization_International   -0.145505     0.021053     -6.911      0.000 ***
   Equation 4:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    highest_educational_degree_Advanced Degree    0.038354     0.000000      0.000      0.000 ***
-    internationalization_International   -0.179504     0.000000      0.000      0.000 ***
+    highest_educational_degree_Advanced Degree    0.038354     0.023588      1.626      0.104 
+    internationalization_International   -0.179504     0.029638     -6.057      0.000 ***
   Equation 5:
                 Coef.      Std.Err         z        P>|z|
     -------------------------------------------------------------
-    highest_educational_degree_Advanced Degree    0.047035     0.000000      0.000      0.000 ***
-    internationalization_International   -0.019348     0.000000      0.000      0.000 ***
+    highest_educational_degree_Advanced Degree    0.047035     0.149734      0.314      0.753 
+    internationalization_International   -0.019348     0.197115     -0.098      0.922 
 
 ======================================================================
 

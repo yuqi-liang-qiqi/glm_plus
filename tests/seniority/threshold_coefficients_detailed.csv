@@ -1,21 +1,21 @@
 country,model_type,variable,threshold,threshold_readable,coefficient,std_error,p_value,significant_05,significant_01
-us,Full_Model,internationalization_Multinational,cut1,Junior→Assistant,0.18899149286300285,0.0,0.0,True,True
-us,Full_Model,internationalization_Multinational,cut2,Assistant→Regular,0.4249016093134086,0.0,0.0,True,True
-us,Full_Model,internationalization_Multinational,cut3,Regular→Senior,0.1511256643773757,0.0,0.0,True,True
-us,Full_Model,internationalization_Multinational,cut4,Senior→Leader,0.11295095860305394,0.0,0.0,True,True
-us,Full_Model,internationalization_Multinational,cut5,Leader→Chief/founder,-0.612795027319418,0.0,0.0,True,True
-us,Full_Model,internationalization_International,cut1,Junior→Assistant,0.2743987883253617,0.0,0.0,True,True
-us,Full_Model,internationalization_International,cut2,Assistant→Regular,-0.08080096489023321,0.0,0.0,True,True
-us,Full_Model,internationalization_International,cut3,Regular→Senior,0.06366556791202009,0.0,0.0,True,True
-us,Full_Model,internationalization_International,cut4,Senior→Leader,-0.1737962288156858,0.0,0.0,True,True
-us,Full_Model,internationalization_International,cut5,Leader→Chief/founder,-0.4531754464684743,0.0,0.0,True,True
-india,Full_Model,highest_educational_degree_Advanced Degree,cut1,Junior→Assistant,0.057989902949387724,0.0,0.0,True,True
-india,Full_Model,highest_educational_degree_Advanced Degree,cut2,Assistant→Regular,0.2034266777747764,0.0,0.0,True,True
-india,Full_Model,highest_educational_degree_Advanced Degree,cut3,Regular→Senior,0.2062748272673073,0.0,0.0,True,True
-india,Full_Model,highest_educational_degree_Advanced Degree,cut4,Senior→Leader,0.03835372756080626,0.0,0.0,True,True
-india,Full_Model,highest_educational_degree_Advanced Degree,cut5,Leader→Chief/founder,0.04703482021967106,0.0,0.0,True,True
-india,Full_Model,internationalization_International,cut1,Junior→Assistant,0.13651046403386166,0.0,0.0,True,True
-india,Full_Model,internationalization_International,cut2,Assistant→Regular,0.17531920023978062,0.0,0.0,True,True
-india,Full_Model,internationalization_International,cut3,Regular→Senior,-0.1455045340659811,0.0,0.0,True,True
-india,Full_Model,internationalization_International,cut4,Senior→Leader,-0.17950412244714542,0.0,0.0,True,True
-india,Full_Model,internationalization_International,cut5,Leader→Chief/founder,-0.019348215264870145,0.0,0.0,True,True
+us,Full_Model,internationalization_Multinational,cut1,Junior→Assistant,0.18899149286300285,0.05265401396535434,0.0003315564576336083,True,True
+us,Full_Model,internationalization_Multinational,cut2,Assistant→Regular,0.4249016093134086,0.03747586110540228,0.0,True,True
+us,Full_Model,internationalization_Multinational,cut3,Regular→Senior,0.1511256643773757,0.011128947181795539,0.0,True,True
+us,Full_Model,internationalization_Multinational,cut4,Senior→Leader,0.11295095860305394,0.0170485482694302,3.466515963168604e-11,True,True
+us,Full_Model,internationalization_Multinational,cut5,Leader→Chief/founder,-0.612795027319418,0.050065149891422765,0.0,True,True
+us,Full_Model,internationalization_International,cut1,Junior→Assistant,0.2743987883253617,0.094513350697549,0.003692754761980943,True,True
+us,Full_Model,internationalization_International,cut2,Assistant→Regular,-0.08080096489023321,0.05935855960922583,0.1734393516258823,False,False
+us,Full_Model,internationalization_International,cut3,Regular→Senior,0.06366556791202009,0.021949076433174064,0.0037244481844596056,True,True
+us,Full_Model,internationalization_International,cut4,Senior→Leader,-0.1737962288156858,0.03899510167612839,8.31637081688541e-06,True,True
+us,Full_Model,internationalization_International,cut5,Leader→Chief/founder,-0.4531754464684743,0.14042545613427185,0.0012502542983459097,True,True
+india,Full_Model,highest_educational_degree_Advanced Degree,cut1,Junior→Assistant,0.057989902949387724,0.04534245246189978,0.20092108406593212,False,False
+india,Full_Model,highest_educational_degree_Advanced Degree,cut2,Assistant→Regular,0.2034266777747764,0.04234084035637156,1.5513668172317807e-06,True,True
+india,Full_Model,highest_educational_degree_Advanced Degree,cut3,Regular→Senior,0.2062748272673073,0.015920911098050935,0.0,True,True
+india,Full_Model,highest_educational_degree_Advanced Degree,cut4,Senior→Leader,0.03835372756080626,0.02358819342548389,0.10395574253974038,False,False
+india,Full_Model,highest_educational_degree_Advanced Degree,cut5,Leader→Chief/founder,0.04703482021967106,0.14973383368924165,0.7534277271500143,False,False
+india,Full_Model,internationalization_International,cut1,Junior→Assistant,0.13651046403386166,0.0541701007618347,0.011734369402347289,True,False
+india,Full_Model,internationalization_International,cut2,Assistant→Regular,0.17531920023978062,0.050760060658725,0.0005525815043188054,True,True
+india,Full_Model,internationalization_International,cut3,Regular→Senior,-0.1455045340659811,0.02105348339108225,4.806155473602303e-12,True,True
+india,Full_Model,internationalization_International,cut4,Senior→Leader,-0.17950412244714542,0.02963809097592935,1.3908525442474229e-09,True,True
+india,Full_Model,internationalization_International,cut5,Leader→Chief/founder,-0.019348215264870145,0.19711468505245636,0.9218075092238107,False,False

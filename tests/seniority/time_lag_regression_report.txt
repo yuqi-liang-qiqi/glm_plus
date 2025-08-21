@@ -1,5 +1,5 @@
 Time Lag Ordinal Regression Report
-Generated: 2025-08-21 10:55:30
+Generated: 2025-08-21 12:54:40
 
 RESEARCH QUESTION: Does t-year rarity_score predict t+1 year seniority?
 
@@ -46,8 +46,8 @@ Fixed effects included:
 
 Country-level summary (one row per country):
 country       method  coef_rarity_z  se  pval  PseudoR2      N  AME_rarity_per1SD
-  india Gologit2_Lag            NaN NaN   NaN  0.121424 115047           0.044337
-     us Gologit2_Lag            NaN NaN   NaN  0.152040 178605          -0.008480
+  india Gologit2_Lag            NaN NaN   NaN  0.121424 115047           0.044046
+     us Gologit2_Lag            NaN NaN   NaN  0.152040 178605          -0.008514
 
 PRIMARY METRICS (for publication): AME(E[Y]) and Threshold Probability Effects with 95% CIs
 - AME(E[Y]) reported per +1 SD for rarity_score_z
@@ -55,7 +55,8 @@ PRIMARY METRICS (for publication): AME(E[Y]) and Threshold Probability Effects w
 - If analytic SEs are unavailable (SE=NaN), bootstrap percentile 95% CIs are used
 
 Country: us
-  AME(E[Y]) per +1 SD: -0.008480  [95% CI: analytic or N/A]
+  AME(E[Y]) per +1 SD: -0.008514
+  95% CI: analytic or N/A
   dPr(Y≥j)/dx by threshold:
     cut1    0.000000
     cut2   -0.000229
@@ -64,7 +65,8 @@ Country: us
     cut5   -0.002101
 
 Country: india
-  AME(E[Y]) per +1 SD: 0.044337  [95% CI: analytic or N/A]
+  AME(E[Y]) per +1 SD: 0.044046
+  95% CI: analytic or N/A
   dPr(Y≥j)/dx by threshold:
     cut1   -0.000000
     cut2    0.002998
@@ -81,8 +83,8 @@ This is normal because:
 3. AME is a weighted average across all thresholds, closer to actual average effect
 4. Use AME for interpretation, not individual coefficient values
 
-- us: AME(E[Y]) for rarity_score (per +1 SD) = -0.008480 (per+1SD)
-- india: AME(E[Y]) for rarity_score (per +1 SD) = 0.044337 (per+1SD)
+- us: AME(E[Y]) for rarity_score (per +1 SD) = -0.008514 (per+1SD (central))
+- india: AME(E[Y]) for rarity_score (per +1 SD) = 0.044046 (per+1SD (central))
 
 ================================================================================
 THRESHOLD-LEVEL ANALYSIS: rarity_score_z Effects by Career Transition
@@ -109,11 +111,11 @@ Country: us
 Threshold Effects Table:
               coef    dPr_ge
 threshold                   
-cut1      0.023518  0.000000
-cut2      0.023518 -0.000229
-cut3      0.023518 -0.000485
-cut4      0.023518 -0.005411
-cut5      0.023518 -0.002101
+cut1      1.012813  0.000000
+cut2      1.012813 -0.000229
+cut3      1.012813 -0.000485
+cut4      1.012813 -0.005411
+cut5      1.012813 -0.002101
 
 Category Probability Effects:
 Y=0    0.000229
@@ -124,7 +126,7 @@ Y=4   -0.001829
 Y=5   -0.000272
 
 Summary:
-[us] rarity_score_z的门槛异质性：Junior→Assistant: β≈0.024（阈值效应≈0.0000）； Assistant→Regular: β≈0.024（阈值效应≈-0.0002）； Regular→Senior: β≈0.024（阈值效应≈-0.0005）； Senior→Leader: β≈0.024（阈值效应≈-0.0054）； Leader→Chief/founder: β≈0.024（阈值效应≈-0.0021）
+[us] rarity_score_z的门槛异质性：Junior→Assistant: β≈1.013（阈值效应≈0.0000）； Assistant→Regular: β≈1.013（阈值效应≈-0.0002）； Regular→Senior: β≈1.013（阈值效应≈-0.0005）； Senior→Leader: β≈1.013（阈值效应≈-0.0054）； Leader→Chief/founder: β≈1.013（阈值效应≈-0.0021）
 
 Key Insights (based on dPr(Y≥j)/dx):
   - Senior→Leader: rarity decreases Pr(Y≥j) by ≈-0.0054
@@ -136,11 +138,11 @@ Country: india
 Threshold Effects Table:
               coef    dPr_ge
 threshold                   
-cut1      0.068254 -0.000000
-cut2      0.068254  0.002998
-cut3      0.068254  0.003917
-cut4      0.068254  0.025170
-cut5      0.068254  0.011986
+cut1      0.891297 -0.000000
+cut2      0.891297  0.002998
+cut3      0.891297  0.003917
+cut4      0.891297  0.025170
+cut5      0.891297  0.011986
 
 Category Probability Effects:
 Y=0   -0.002998
@@ -151,7 +153,7 @@ Y=4    0.011733
 Y=5    0.000252
 
 Summary:
-[india] rarity_score_z的门槛异质性：Junior→Assistant: β≈0.068（阈值效应≈-0.0000）； Assistant→Regular: β≈0.068（阈值效应≈0.0030）； Regular→Senior: β≈0.068（阈值效应≈0.0039）； Senior→Leader: β≈0.068（阈值效应≈0.0252）； Leader→Chief/founder: β≈0.068（阈值效应≈0.0120）
+[india] rarity_score_z的门槛异质性：Junior→Assistant: β≈0.891（阈值效应≈-0.0000）； Assistant→Regular: β≈0.891（阈值效应≈0.0030）； Regular→Senior: β≈0.891（阈值效应≈0.0039）； Senior→Leader: β≈0.891（阈值效应≈0.0252）； Leader→Chief/founder: β≈0.891（阈值效应≈0.0120）
 
 Key Insights (based on dPr(Y≥j)/dx):
   - Senior→Leader: rarity increases Pr(Y≥j) by ≈0.0252
@@ -188,7 +190,7 @@ McFadden's Pseudo R²: 0.1520
 Adjusted Pseudo R²: 0.1519
 
 Variable Constraints:
-  Parallel-lines (same effect across thresholds): ['year_4', 'simplified_company_size_Medium (51-500 employees)', 'rarity_score_z', 'year_7', 'gender_female', 'year_9', 'simplified_company_size_Small (11-50 employees)', 'year_3', 'year_5', 'year_2', 'year_8', 'whether_bachelor_university_prestigious', 'year_6', 'highest_educational_degree_Advanced Degree', 'work_years', 'simplified_company_size_Large (500+ employees)']
+  Parallel-lines (same effect across thresholds): ['simplified_company_size_Large (500+ employees)', 'year_2', 'whether_bachelor_university_prestigious', 'year_3', 'year_4', 'year_8', 'simplified_company_size_Small (11-50 employees)', 'year_6', 'gender_female', 'highest_educational_degree_Advanced Degree', 'year_9', 'work_years', 'year_7', 'rarity_score_z', 'year_5', 'simplified_company_size_Medium (51-500 employees)']
   Non-parallel (varying effect by threshold): ['internationalization_Multinational', 'internationalization_International']
 
 PARAMETERIZATION vs. Stata gologit2:
@@ -221,22 +223,22 @@ Parallel-Lines Coefficients (same across all thresholds):
 -----------------------------------------------------------------
                 Coef.      Std.Err         z        P>|z|
 -----------------------------------------------------------------
-  year_4     -0.024809     0.037719     -0.658      0.511 
-  simplified_company_size_Medium (51-500 employees)   -0.136489     0.052260     -2.612      0.009 **
-  rarity_score_z    0.023518     0.002547      9.232      0.000 ***
-  year_7      0.045113     0.015293      2.950      0.003 **
-  gender_female    0.010434     0.006032      1.730      0.084 
-  year_9      0.016907     0.013309      1.270      0.204 
+  simplified_company_size_Large (500+ employees)   -0.024809     0.037719     -0.658      0.511 
+  year_2     -0.136489     0.052260     -2.612      0.009 **
+  whether_bachelor_university_prestigious    0.023518     0.002547      9.232      0.000 ***
+  year_3      0.045113     0.015293      2.950      0.003 **
+  year_4      0.010434     0.006032      1.730      0.084 
+  year_8      0.016907     0.013309      1.270      0.204 
   simplified_company_size_Small (11-50 employees)    0.125550     0.042660      2.943      0.003 **
-  year_3      0.055299     0.040178      1.376      0.169 
-  year_5      0.290057     0.106774      2.717      0.007 **
-  year_2      0.473943     0.070845      6.690      0.000 ***
-  year_8      0.644388     0.057454     11.216      0.000 ***
-  whether_bachelor_university_prestigious    0.796236     0.051666     15.411      0.000 ***
-  year_6      0.919699     0.032238     28.528      0.000 ***
-  highest_educational_degree_Advanced Degree    1.012813     0.072446     13.980      0.000 ***
-  work_years    1.091383     0.059745     18.267      0.000 ***
-  simplified_company_size_Large (500+ employees)    1.132316     0.049932     22.677      0.000 ***
+  year_6      0.055299     0.040178      1.376      0.169 
+  gender_female    0.290057     0.106774      2.717      0.007 **
+  highest_educational_degree_Advanced Degree    0.473943     0.070845      6.690      0.000 ***
+  year_9      0.644388     0.057454     11.216      0.000 ***
+  work_years    0.796236     0.051666     15.411      0.000 ***
+  year_7      0.919699     0.032238     28.528      0.000 ***
+  rarity_score_z    1.012813     0.072446     13.980      0.000 ***
+  year_5      1.091383     0.059745     18.267      0.000 ***
+  simplified_company_size_Medium (51-500 employees)    1.132316     0.049932     22.677      0.000 ***
 
 Non-Parallel Coefficients (vary by threshold):
 -----------------------------------------------------------------
@@ -274,13 +276,13 @@ Marginal Effects (APE) by Variable:
 
 Variable: rarity_score_z
   Seniority Level Effects:
-    Junior (level 0): 0.000231
-    Assistant (level 1): 0.000258
-    Regular (level 2): 0.004907
-    Senior (level 3): -0.003305
-    Leader (level 4): -0.001819
-    Chief or founder (level 5): -0.000272
-  Method: Numerical APE (per+1SD) computed via gologit2 over 5000 samples
+    Junior (level 0): 0.000228
+    Assistant (level 1): 0.000255
+    Regular (level 2): 0.004932
+    Senior (level 3): -0.003304
+    Leader (level 4): -0.001837
+    Chief or founder (level 5): -0.000275
+  Method: Numerical APE (per+1SD (central)) computed via gologit2 over 5000 samples
 
 Variable: whether_bachelor_university_prestigious
   Seniority Level Effects:
@@ -300,7 +302,7 @@ Variable: work_years
     Senior (level 3): 0.003132
     Leader (level 4): 0.001741
     Chief or founder (level 5): 0.000261
-  Method: Numerical APE (dx=0.0001) computed via gologit2 over 5000 samples
+  Method: Numerical APE (central_dx=0.0001) computed via gologit2 over 5000 samples
 
 Variable: gender_female
   Seniority Level Effects:
@@ -468,7 +470,7 @@ McFadden's Pseudo R²: 0.1214
 Adjusted Pseudo R²: 0.1212
 
 Variable Constraints:
-  Parallel-lines (same effect across thresholds): ['year_4', 'simplified_company_size_Medium (51-500 employees)', 'rarity_score_z', 'year_7', 'gender_female', 'year_9', 'simplified_company_size_Small (11-50 employees)', 'year_3', 'year_5', 'year_2', 'year_8', 'whether_bachelor_university_prestigious', 'year_6', 'internationalization_Multinational', 'work_years', 'simplified_company_size_Large (500+ employees)']
+  Parallel-lines (same effect across thresholds): ['simplified_company_size_Large (500+ employees)', 'year_2', 'whether_bachelor_university_prestigious', 'year_3', 'year_4', 'year_8', 'simplified_company_size_Small (11-50 employees)', 'year_6', 'gender_female', 'year_9', 'work_years', 'year_7', 'rarity_score_z', 'year_5', 'internationalization_Multinational', 'simplified_company_size_Medium (51-500 employees)']
   Non-parallel (varying effect by threshold): ['highest_educational_degree_Advanced Degree', 'internationalization_International']
 
 PARAMETERIZATION vs. Stata gologit2:
@@ -501,22 +503,22 @@ Parallel-Lines Coefficients (same across all thresholds):
 -----------------------------------------------------------------
                 Coef.      Std.Err         z        P>|z|
 -----------------------------------------------------------------
-  year_4      0.107618     0.014507      7.419      0.000 ***
-  simplified_company_size_Medium (51-500 employees)   -0.006914     0.001988     -3.478      0.001 ***
-  rarity_score_z    0.068254     0.007070      9.654      0.000 ***
-  year_7     -0.070668     0.036299     -1.947      0.052 
-  gender_female   -0.040722     0.019339     -2.106      0.035 *
-  year_9      0.141711     0.044924      3.154      0.002 **
+  simplified_company_size_Large (500+ employees)    0.107618     0.014507      7.419      0.000 ***
+  year_2     -0.006914     0.001988     -3.478      0.001 ***
+  whether_bachelor_university_prestigious    0.068254     0.007070      9.654      0.000 ***
+  year_3     -0.070668     0.036299     -1.947      0.052 
+  year_4     -0.040722     0.019339     -2.106      0.035 *
+  year_8      0.141711     0.044924      3.154      0.002 **
   simplified_company_size_Small (11-50 employees)    0.189289     0.061733      3.066      0.002 **
-  year_3      0.235202     0.036195      6.498      0.000 ***
-  year_5      0.155875     0.028982      5.378      0.000 ***
-  year_2      0.430836     0.024332     17.706      0.000 ***
-  year_8      0.640789     0.025199     25.429      0.000 ***
-  whether_bachelor_university_prestigious    0.792701     0.024171     32.795      0.000 ***
-  year_6      0.891297     0.025558     34.874      0.000 ***
-  internationalization_Multinational    0.965889     0.029195     33.084      0.000 ***
-  work_years    1.025079     0.026281     39.005      0.000 ***
-  simplified_company_size_Large (500+ employees)    1.057061     0.028538     37.040      0.000 ***
+  year_6      0.235202     0.036195      6.498      0.000 ***
+  gender_female    0.155875     0.028982      5.378      0.000 ***
+  year_9      0.430836     0.024332     17.706      0.000 ***
+  work_years    0.640789     0.025199     25.429      0.000 ***
+  year_7      0.792701     0.024171     32.795      0.000 ***
+  rarity_score_z    0.891297     0.025558     34.874      0.000 ***
+  year_5      0.965889     0.029195     33.084      0.000 ***
+  internationalization_Multinational    1.025079     0.026281     39.005      0.000 ***
+  simplified_company_size_Medium (51-500 employees)    1.057061     0.028538     37.040      0.000 ***
 
 Non-Parallel Coefficients (vary by threshold):
 -----------------------------------------------------------------
@@ -554,13 +556,13 @@ Marginal Effects (APE) by Variable:
 
 Variable: rarity_score_z
   Seniority Level Effects:
-    Junior (level 0): -0.002984
-    Assistant (level 1): -0.000918
-    Regular (level 2): -0.021278
-    Senior (level 3): 0.013166
-    Leader (level 4): 0.011761
-    Chief or founder (level 5): 0.000254
-  Method: Numerical APE (per+1SD) computed via gologit2 over 5000 samples
+    Junior (level 0): -0.003137
+    Assistant (level 1): -0.000960
+    Regular (level 2): -0.020909
+    Senior (level 3): 0.013443
+    Leader (level 4): 0.011323
+    Chief or founder (level 5): 0.000240
+  Method: Numerical APE (per+1SD (central)) computed via gologit2 over 5000 samples
 
 Variable: whether_bachelor_university_prestigious
   Seniority Level Effects:
@@ -580,7 +582,7 @@ Variable: work_years
     Senior (level 3): 0.008530
     Leader (level 4): 0.007181
     Chief or founder (level 5): 0.000152
-  Method: Numerical APE (dx=0.0001) computed via gologit2 over 5000 samples
+  Method: Numerical APE (central_dx=0.0001) computed via gologit2 over 5000 samples
 
 Variable: gender_female
   Seniority Level Effects:

@@ -16,8 +16,11 @@ default_csv = os.path.join(script_dir, "final_df.csv")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--final-csv", dest="final_csv", default=default_csv, help="Path to final_df.csv")
-parser.add_argument("--bootstrap-n", dest="bootstrap_n", type=int, default=0, help="Number of bootstrap replications (0 to disable)")
-parser.add_argument("--bootstrap-cluster", dest="bootstrap_cluster", action="store_true", help="Use cluster (worker_id) bootstrap if enabled")
+# 默认开启自助法：200 次复制；可用 --bootstrap-n 0 关闭
+parser.add_argument("--bootstrap-n", dest="bootstrap_n", type=int, default=200, help="Number of bootstrap replications (0 to disable)")
+# 默认开启聚类自助（按 worker_id）；可用 --no-bootstrap-cluster 关闭
+parser.add_argument("--bootstrap-cluster", dest="bootstrap_cluster", action="store_true", default=True, help="Use cluster (worker_id) bootstrap (use --no-bootstrap-cluster to disable)")
+parser.add_argument("--no-bootstrap-cluster", dest="bootstrap_cluster", action="store_false")
 args = parser.parse_args()
 
 final_df = pd.read_csv(args.final_csv)
@@ -389,6 +392,13 @@ for ctry in countries:
             if not dummies.empty:
                 X_parts.append(dummies)
 
+    # === 加入交互项：female × rarity_score_z ===
+    if 'gender_female' in dfc.columns and 'rarity_score_z' in dfc.columns:
+        inter_col = pd.DataFrame({
+            'rarity_score_z_x_gender_female': (dfc['rarity_score_z'].astype(float) * dfc['gender_female'].astype(float))
+        })
+        X_parts.append(inter_col)
+
     # === 加入时间固定效应（Year FE：year_current 的虚拟变量）===
     if 'year_current' in dfc.columns:
         year_cat = dfc['year_current'].astype(int).astype('category')
@@ -509,11 +519,15 @@ for ctry in countries:
             if 'rarity_score_z' in feature_names:
                 candidate_npl_vars.append('rarity_score_z')
             
-            # 2. 国际化变量：可能在不同职级有不同效应
+            # 2. 交互项：female × rarity_score_z
+            if 'rarity_score_z_x_gender_female' in feature_names:
+                candidate_npl_vars.append('rarity_score_z_x_gender_female')
+
+            # 3. 国际化变量：可能在不同职级有不同效应
             intl_vars = [col for col in feature_names if 'internationalization' in col.lower()]
             candidate_npl_vars.extend(intl_vars)
             
-            # 3. 教育变量：可能在职业进阶不同阶段效应不同
+            # 4. 教育变量：可能在职业进阶不同阶段效应不同
             edu_vars = [col for col in feature_names if 'educational_degree' in col.lower() and col not in always_parallel]
             candidate_npl_vars.extend(edu_vars)
             
@@ -810,12 +824,13 @@ for ctry in countries:
             models[(ctry, 'ordered_logit_lag_ape_allvars')] = per_var_ape
             print(f"  {ctry}: 边际效应计算完成")
 
-            # === 可选：Cluster Bootstrap AME 与阈值效应CI ===
+            # === 可选：Cluster Bootstrap AME 与阈值效应（CI/SE/p）===
             if args.bootstrap_n and args.bootstrap_n > 0:
-                print(f"  {ctry}: 启动Bootstrap (n={args.bootstrap_n}, cluster={args.bootstrap_cluster}) 以估计AME与阈值效应CI...")
+                print(f"  {ctry}: 启动Bootstrap (n={args.bootstrap_n}, cluster={args.bootstrap_cluster}) 以估计AME与阈值/类别效应的CI/SE/p…")
                 rng = np.random.RandomState(20250820)
                 ame_boot = []
                 dpr_ge_boot = []  # list of Series indexed by threshold
+                dpr_cat_boot = []  # list of Series indexed by category (Y=0..J-1)
                 pl_vars_current = model.pl_vars
                 feat_names_current = feature_names
                 link_current = model.link
@@ -837,34 +852,98 @@ for ctry in countries:
                         X_b = X_final.iloc[boot_idx]
                         y_b = y_clean.iloc[boot_idx]
                         boot_model = GeneralizedOrderedModel(link=link_current, pl_vars=pl_vars_current)
-                        boot_res = boot_model.fit(X_b.values, y_b.values, feature_names=feat_names_current, verbose=False, compute_se=False, maxiter=1000)
+                        boot_res = boot_model.fit(
+                            X_b.values,
+                            y_b.values,
+                            feature_names=feat_names_current,
+                            verbose=False,
+                            compute_se=False,
+                            maxiter=1000
+                        )
                         if not boot_res.success:
                             continue
                         ame_b, _ = compute_ame_expected(boot_model, X_b, 'rarity_score_z')
                         ame_boot.append(ame_b)
                         dpr_b = boot_res.dPr_ge_by_threshold(X_b.values, 'rarity_score_z')
                         dpr_ge_boot.append(dpr_b)
+                        dpr_cat_b = boot_res.dPr_cat_by_threshold(X_b.values, 'rarity_score_z')
+                        dpr_cat_boot.append(dpr_cat_b)
                     except Exception:
                         continue
+
+                # AME CI/SE/p
                 if len(ame_boot) > 0:
                     ame_ci = (np.nanpercentile(ame_boot, 2.5), np.nanpercentile(ame_boot, 97.5))
+                    ame_se = float(np.nanstd(ame_boot, ddof=1)) if len(ame_boot) > 1 else np.nan
+                    ame_point = models.get((ctry, 'ordered_logit_lag_ame_rarity'), {}).get('ame', np.nan)
+                    if np.isfinite(ame_point) and np.isfinite(ame_se) and ame_se > 0:
+                        ame_z = float(ame_point) / float(ame_se)
+                        ame_p = 2.0 * (1.0 - stats.norm.cdf(abs(ame_z)))
+                    else:
+                        ame_p = np.nan
                 else:
                     ame_ci = (np.nan, np.nan)
+                    ame_se = np.nan
+                    ame_p = np.nan
+
+                # dPr(Y≥j)/dx CI/SE/p
+                dpr_ci = None
+                dpr_se_series = None
+                dpr_p_series = None
+                try:
+                    dpr_point = res.dPr_ge_by_threshold(X_final.values, 'rarity_score_z')
+                except Exception:
+                    dpr_point = None
                 if len(dpr_ge_boot) > 0:
                     dpr_mat = pd.DataFrame(dpr_ge_boot)
                     dpr_ci = pd.DataFrame({
                         'low': dpr_mat.quantile(0.025),
                         'high': dpr_mat.quantile(0.975)
                     })
-                else:
-                    dpr_ci = None
+                    if dpr_mat.shape[0] > 1:
+                        dpr_se_series = dpr_mat.std(axis=0, ddof=1)
+                        if dpr_point is not None:
+                            with np.errstate(invalid='ignore', divide='ignore'):
+                                dpr_z = dpr_point / dpr_se_series
+                            dpr_p_vals = 2.0 * (1.0 - stats.norm.cdf(np.abs(dpr_z)))
+                            dpr_p_series = pd.Series(dpr_p_vals, index=dpr_mat.columns)
+
+                # dPr(Y=c)/dx CI/SE/p
+                dpr_cat_ci = None
+                dpr_cat_se_series = None
+                dpr_cat_p_series = None
+                try:
+                    dpr_cat_point = res.dPr_cat_by_threshold(X_final.values, 'rarity_score_z')
+                except Exception:
+                    dpr_cat_point = None
+                if len(dpr_cat_boot) > 0:
+                    dpr_cat_mat = pd.DataFrame(dpr_cat_boot)
+                    dpr_cat_ci = pd.DataFrame({
+                        'low': dpr_cat_mat.quantile(0.025),
+                        'high': dpr_cat_mat.quantile(0.975)
+                    })
+                    if dpr_cat_mat.shape[0] > 1:
+                        dpr_cat_se_series = dpr_cat_mat.std(axis=0, ddof=1)
+                        if dpr_cat_point is not None:
+                            with np.errstate(invalid='ignore', divide='ignore'):
+                                dpr_cat_z = dpr_cat_point / dpr_cat_se_series
+                            dpr_cat_p_vals = 2.0 * (1.0 - stats.norm.cdf(np.abs(dpr_cat_z)))
+                            dpr_cat_p_series = pd.Series(dpr_cat_p_vals, index=dpr_cat_mat.columns)
+
                 models[(ctry, 'bootstrap_ci')] = {
-                    'n_success': len(ame_boot),
+                    'n_success': int(len(ame_boot)),
                     'method': 'percentile',
                     'ame_ci': ame_ci,
-                    'dpr_ge_ci': dpr_ci
+                    'ame_se': ame_se,
+                    'ame_p': ame_p,
+                    'dpr_ge_ci': dpr_ci,
+                    'dpr_ge_se': dpr_se_series,
+                    'dpr_ge_p': dpr_p_series,
+                    'dpr_cat_ci': dpr_cat_ci,
+                    'dpr_cat_se': dpr_cat_se_series,
+                    'dpr_cat_p': dpr_cat_p_series
                 }
-                print(f"  {ctry}: Bootstrap完成，有效复制 {len(ame_boot)}/{args.bootstrap_n} 次；AME 95%CI={ame_ci}")
+                print(f"  {ctry}: Bootstrap完成，有效复制 {len(ame_boot)}/{args.bootstrap_n} 次；AME 95%CI={ame_ci}，SE={ame_se if np.isfinite(ame_se) else 'NA'}，p={ame_p if np.isfinite(ame_p) else 'NA'}")
             
         except Exception as e:
             print(f"⚠ {ctry}: gologit2回归失败: {str(e)}")
@@ -883,6 +962,11 @@ for ctry in countries:
                 essential_controls.append('gender_female')
             
             X_simple = dfc[['rarity_score_z'] + essential_controls].copy()
+            # 交互项：female × rarity_score_z
+            if 'gender_female' in X_simple.columns and 'rarity_score_z' in X_simple.columns:
+                X_simple['rarity_score_z_x_gender_female'] = (
+                    X_simple['rarity_score_z'].astype(float) * X_simple['gender_female'].astype(float)
+                )
 
             # 加入时间固定效应到简化模型（Year FE）
             if 'year_current' in dfc.columns:
@@ -952,7 +1036,11 @@ for ctry in countries:
             # 简化模型通常变量较少，使用保守的策略
             # 将所有控制变量设为parallel，只让rarity_score_z可能non-parallel
             conservative_parallel = [col for col in feature_names_simple if col != 'rarity_score_z']
-            candidate_npl_simple = ['rarity_score_z'] if 'rarity_score_z' in feature_names_simple else []
+            candidate_npl_simple = []
+            if 'rarity_score_z' in feature_names_simple:
+                candidate_npl_simple.append('rarity_score_z')
+            if 'rarity_score_z_x_gender_female' in feature_names_simple:
+                candidate_npl_simple.append('rarity_score_z_x_gender_female')
             
             print(f"  {ctry}: 简化模型 - 保守parallel变量: {conservative_parallel}")
             print(f"  {ctry}: 简化模型 - 候选非平行变量: {candidate_npl_simple}")
@@ -1178,6 +1266,127 @@ for ctry in countries:
             models[(ctry, 'ordered_logit_lag_simple_ape_allvars')] = per_var_ape_simple
             print(f"  {ctry}: 简化模型边际效应计算完成")
             
+            # === 可选：简化模型的Bootstrap（CI/SE/p）===
+            if args.bootstrap_n and args.bootstrap_n > 0:
+                print(f"  {ctry}: [简化模型] 启动Bootstrap (n={args.bootstrap_n}, cluster={args.bootstrap_cluster}) 以估计AME与阈值/类别效应的CI/SE/p…")
+                rng = np.random.RandomState(20250820)
+                ame_boot = []
+                dpr_ge_boot = []
+                dpr_cat_boot = []
+                pl_vars_current = model_simple.pl_vars
+                feat_names_current = feature_names_simple
+                link_current = model_simple.link
+                clusters_all = pd.Series(cluster_simple)
+                for b in range(int(args.bootstrap_n)):
+                    try:
+                        if args.bootstrap_cluster:
+                            uniq = clusters_all.unique()
+                            sampled = rng.choice(uniq, size=len(uniq), replace=True)
+                            parts = []
+                            for g in sampled:
+                                idx = clusters_all.index[clusters_all == g]
+                                parts.append(idx.values)
+                            if not parts:
+                                continue
+                            boot_idx = np.concatenate(parts)
+                        else:
+                            boot_idx = rng.choice(len(y_simple_clean), size=len(y_simple_clean), replace=True)
+                        X_b = X_simple_clean.iloc[boot_idx]
+                        y_b = y_simple_clean.iloc[boot_idx]
+                        boot_model = GeneralizedOrderedModel(link=link_current, pl_vars=pl_vars_current)
+                        boot_res = boot_model.fit(
+                            X_b.values,
+                            y_b.values,
+                            feature_names=feat_names_current,
+                            verbose=False,
+                            compute_se=False,
+                            maxiter=1000
+                        )
+                        if not boot_res.success:
+                            continue
+                        ame_b, _ = compute_ame_expected(boot_model, X_b, 'rarity_score_z')
+                        ame_boot.append(ame_b)
+                        dpr_b = boot_res.dPr_ge_by_threshold(X_b.values, 'rarity_score_z')
+                        dpr_ge_boot.append(dpr_b)
+                        dpr_cat_b = boot_res.dPr_cat_by_threshold(X_b.values, 'rarity_score_z')
+                        dpr_cat_boot.append(dpr_cat_b)
+                    except Exception:
+                        continue
+
+                # AME CI/SE/p
+                if len(ame_boot) > 0:
+                    ame_ci = (np.nanpercentile(ame_boot, 2.5), np.nanpercentile(ame_boot, 97.5))
+                    ame_se = float(np.nanstd(ame_boot, ddof=1)) if len(ame_boot) > 1 else np.nan
+                    ame_point = models.get((ctry, 'ordered_logit_lag_simple_ame_rarity'), {}).get('ame', np.nan)
+                    if np.isfinite(ame_point) and np.isfinite(ame_se) and ame_se > 0:
+                        ame_z = float(ame_point) / float(ame_se)
+                        ame_p = 2.0 * (1.0 - stats.norm.cdf(abs(ame_z)))
+                    else:
+                        ame_p = np.nan
+                else:
+                    ame_ci = (np.nan, np.nan)
+                    ame_se = np.nan
+                    ame_p = np.nan
+
+                # dPr(Y≥j)/dx CI/SE/p
+                dpr_ci = None
+                dpr_se_series = None
+                dpr_p_series = None
+                try:
+                    dpr_point = res_simple.dPr_ge_by_threshold(X_simple_clean.values, 'rarity_score_z')
+                except Exception:
+                    dpr_point = None
+                if len(dpr_ge_boot) > 0:
+                    dpr_mat = pd.DataFrame(dpr_ge_boot)
+                    dpr_ci = pd.DataFrame({
+                        'low': dpr_mat.quantile(0.025),
+                        'high': dpr_mat.quantile(0.975)
+                    })
+                    if dpr_mat.shape[0] > 1:
+                        dpr_se_series = dpr_mat.std(axis=0, ddof=1)
+                        if dpr_point is not None:
+                            with np.errstate(invalid='ignore', divide='ignore'):
+                                dpr_z = dpr_point / dpr_se_series
+                            dpr_p_vals = 2.0 * (1.0 - stats.norm.cdf(np.abs(dpr_z)))
+                            dpr_p_series = pd.Series(dpr_p_vals, index=dpr_mat.columns)
+
+                # dPr(Y=c)/dx CI/SE/p
+                dpr_cat_ci = None
+                dpr_cat_se_series = None
+                dpr_cat_p_series = None
+                try:
+                    dpr_cat_point = res_simple.dPr_cat_by_threshold(X_simple_clean.values, 'rarity_score_z')
+                except Exception:
+                    dpr_cat_point = None
+                if len(dpr_cat_boot) > 0:
+                    dpr_cat_mat = pd.DataFrame(dpr_cat_boot)
+                    dpr_cat_ci = pd.DataFrame({
+                        'low': dpr_cat_mat.quantile(0.025),
+                        'high': dpr_cat_mat.quantile(0.975)
+                    })
+                    if dpr_cat_mat.shape[0] > 1:
+                        dpr_cat_se_series = dpr_cat_mat.std(axis=0, ddof=1)
+                        if dpr_cat_point is not None:
+                            with np.errstate(invalid='ignore', divide='ignore'):
+                                dpr_cat_z = dpr_cat_point / dpr_cat_se_series
+                            dpr_cat_p_vals = 2.0 * (1.0 - stats.norm.cdf(np.abs(dpr_cat_z)))
+                            dpr_cat_p_series = pd.Series(dpr_cat_p_vals, index=dpr_cat_mat.columns)
+
+                models[(ctry, 'bootstrap_ci')] = {
+                    'n_success': int(len(ame_boot)),
+                    'method': 'percentile',
+                    'ame_ci': ame_ci,
+                    'ame_se': ame_se,
+                    'ame_p': ame_p,
+                    'dpr_ge_ci': dpr_ci,
+                    'dpr_ge_se': dpr_se_series,
+                    'dpr_ge_p': dpr_p_series,
+                    'dpr_cat_ci': dpr_cat_ci,
+                    'dpr_cat_se': dpr_cat_se_series,
+                    'dpr_cat_p': dpr_cat_p_series
+                }
+                print(f"  {ctry}: [简化模型] Bootstrap完成，有效复制 {len(ame_boot)}/{args.bootstrap_n} 次；AME 95%CI={ame_ci}，SE={ame_se if np.isfinite(ame_se) else 'NA'}，p={ame_p if np.isfinite(ame_p) else 'NA'}")
+            
         except Exception as e2:
             print(f"✗ {ctry}: 所有时间滞后gologit2回归方法都失败了: {str(e2)}")
             results.append({'country': ctry, 'method': 'FAILED', 'coef_rarity_z': np.nan, 'se': np.nan, 'pval': np.nan, 'PseudoR2': np.nan, 'N': 0, 'AME_rarity_per1SD': np.nan})
@@ -1335,16 +1544,22 @@ with open(report_path, "w", encoding="utf-8") as f:
         else:
             ame_obj = models[ame_key]
             ame = ame_obj.get('ame', np.nan)
-            f.write(f"  AME(E[Y]) per +1 SD: {ame:.6f}")
+            f.write(f"  AME(E[Y]) per +1 SD: {ame:.6f}\n")
             ci_key = (ctry, 'bootstrap_ci')
             if ci_key in models and models[ci_key].get('ame_ci') is not None:
                 low, high = models[ci_key]['ame_ci']
                 if np.isfinite(low) and np.isfinite(high):
-                    f.write(f"  [95% CI: {low:.6f}, {high:.6f}]\n")
+                    f.write(f"  95% CI (bootstrap percentile): [{low:.6f}, {high:.6f}]\n")
                 else:
-                    f.write("  [95% CI: N/A]\n")
+                    f.write("  95% CI (bootstrap percentile): N/A\n")
+                ame_se = models[ci_key].get('ame_se', np.nan)
+                ame_p = models[ci_key].get('ame_p', np.nan)
+                if np.isfinite(ame_se):
+                    f.write(f"  SE (bootstrap): {ame_se:.6f}\n")
+                if np.isfinite(ame_p):
+                    f.write(f"  p-value (z, H0=0): {ame_p:.4f}\n")
             else:
-                f.write("  [95% CI: analytic or N/A]\n")
+                f.write("  95% CI: analytic or N/A\n")
         # Threshold probability effects
         threshold_key = (ctry, 'threshold_analysis') if (ctry, 'threshold_analysis') in models else (
                        (ctry, 'threshold_analysis_simple') if (ctry, 'threshold_analysis_simple') in models else None)
@@ -1359,6 +1574,20 @@ with open(report_path, "w", encoding="utf-8") as f:
             f.write("  95% CI (percentile) by threshold:\n")
             dpr_ci = models[ci_key]['dpr_ge_ci']
             f.write("    " + dpr_ci.to_string(float_format='%.6f').replace("\n", "\n    ") + "\n")
+        if ci_key in models and models[ci_key].get('dpr_ge_se') is not None:
+            dpr_se = models[ci_key]['dpr_ge_se']
+            try:
+                f.write("  SE (bootstrap) by threshold:\n")
+                f.write("    " + dpr_se.to_string(float_format='%.6f').replace("\n", "\n    ") + "\n")
+            except Exception:
+                pass
+        if ci_key in models and models[ci_key].get('dpr_ge_p') is not None:
+            dpr_p = models[ci_key]['dpr_ge_p']
+            try:
+                f.write("  p-value (z, H0=0) by threshold:\n")
+                f.write("    " + dpr_p.to_string(float_format='%.4f').replace("\n", "\n    ") + "\n")
+            except Exception:
+                pass
         f.write("\n")
 
     # 写入各国"系数的平均边际效应（对期望职级E[Y]）"
@@ -1432,7 +1661,7 @@ with open(report_path, "w", encoding="utf-8") as f:
         f.write(dpr_cat.to_string(float_format='%.6f'))
         f.write("\n\n")
 
-        # 若存在Bootstrap CI，则附加
+        # 若存在Bootstrap CI/SE/p，则附加
         ci_key = (ctry, 'bootstrap_ci')
         if ci_key in models:
             ci_obj = models[ci_key]
@@ -1443,6 +1672,48 @@ with open(report_path, "w", encoding="utf-8") as f:
             if dpr_ci is not None:
                 f.write("  dPr(Y≥j)/dx 95% CI by threshold:\n")
                 f.write(dpr_ci.to_string(float_format='%.6f'))
+                f.write("\n\n")
+            # 追加 SE 与 p for dPr_ge
+            dpr_ge_se_series = ci_obj.get('dpr_ge_se', None)
+            if dpr_ge_se_series is not None:
+                f.write("  dPr(Y≥j)/dx SE (bootstrap) by threshold:\n")
+                try:
+                    f.write(dpr_ge_se_series.to_string(float_format='%.6f'))
+                except Exception:
+                    f.write(str(dpr_ge_se_series))
+                f.write("\n")
+            dpr_ge_p_series = ci_obj.get('dpr_ge_p', None)
+            if dpr_ge_p_series is not None:
+                f.write("  dPr(Y≥j)/dx p-value (z, H0=0) by threshold:\n")
+                try:
+                    f.write(dpr_ge_p_series.to_string(float_format='%.4f'))
+                except Exception:
+                    f.write(str(dpr_ge_p_series))
+                f.write("\n\n")
+            # 追加 类别概率效应的 CI/SE/p
+            dpr_cat_ci_obj = ci_obj.get('dpr_cat_ci', None)
+            if dpr_cat_ci_obj is not None:
+                f.write("  dPr(Y=c)/dx 95% CI by category:\n")
+                try:
+                    f.write(dpr_cat_ci_obj.to_string(float_format='%.6f'))
+                except Exception:
+                    f.write(str(dpr_cat_ci_obj))
+                f.write("\n")
+            dpr_cat_se_series = ci_obj.get('dpr_cat_se', None)
+            if dpr_cat_se_series is not None:
+                f.write("  dPr(Y=c)/dx SE (bootstrap) by category:\n")
+                try:
+                    f.write(dpr_cat_se_series.to_string(float_format='%.6f'))
+                except Exception:
+                    f.write(str(dpr_cat_se_series))
+                f.write("\n")
+            dpr_cat_p_series = ci_obj.get('dpr_cat_p', None)
+            if dpr_cat_p_series is not None:
+                f.write("  dPr(Y=c)/dx p-value (z, H0=0) by category:\n")
+                try:
+                    f.write(dpr_cat_p_series.to_string(float_format='%.4f'))
+                except Exception:
+                    f.write(str(dpr_cat_p_series))
                 f.write("\n\n")
         
         # 写入文字摘要

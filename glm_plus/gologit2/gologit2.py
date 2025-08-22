@@ -325,7 +325,7 @@ class Gologit2Result:
         
         # 自动选择合适的步长：对标准化变量使用dx=1.0（对齐+1SD），其他用小步长
         if dx is None:
-            dx = 1.0 if var_name.endswith('_z') else 1e-4
+            dx = 1.0 if (('_z' in var_name) or ('rarity_score_z' in var_name)) else 1e-4
         
         # 需要创建临时模型实例进行预测（继承当前链接函数）
         temp_model = GeneralizedOrderedModel(link=self.link)  # 临时实例
@@ -347,9 +347,10 @@ class Gologit2Result:
         # 数值导数
         dP_ge = (P_ge_plus - P_ge) / dx  # (n,M)
         
-        # 只取门槛1..K-1（最后一列是Pr(Y>=M)对应最高类别）
+        # 只取门槛1..K-1：列1..K对应Pr(Y>=1)..Pr(Y>=K)
+        # 注意：列0对应Pr(Y>=0)≡1，其导数应为0，必须跳过
         K = len(self.alphas)  # 门槛数
-        avg_effects = dP_ge[:, :K].mean(axis=0)
+        avg_effects = dP_ge[:, 1:K+1].mean(axis=0)
         
         cuts = [f"cut{j}" for j in range(1, K + 1)]
         return pd.Series(avg_effects, index=cuts, name=f"dPr(Y>=cut)/d{var_name}")
@@ -378,7 +379,7 @@ class Gologit2Result:
         
         # 自动选择合适的步长：对标准化变量使用dx=1.0（对齐+1SD），其他用小步长
         if dx is None:
-            dx = 1.0 if var_name.endswith('_z') else 1e-4
+            dx = 1.0 if (('_z' in var_name) or ('rarity_score_z' in var_name)) else 1e-4
         
         # 创建临时模型实例（继承当前链接函数）
         temp_model = GeneralizedOrderedModel(link=self.link)
@@ -408,7 +409,8 @@ class Gologit2Result:
         lines.append(f"Categories: {self.categories.tolist()}")
         lines.append(f"Convergence: {'Yes' if self.success else 'No'}")
         lines.append(f"Iterations: {self.n_iter}")
-        lines.append(f"Negative Log-Likelihood: {self.fun:.6f}")
+        # 为避免术语混淆，这里统一报告对数似然（负值）：
+        lines.append(f"Log-Likelihood: {-self.fun:.6f}")
         if self.null_loglik is not None:
             lines.append(f"Null Log-Likelihood: {self.null_loglik:.6f}")
         if self.pseudo_r2 is not None:
@@ -425,11 +427,9 @@ class Gologit2Result:
         lines.append(f"  Non-parallel (varying effect by threshold): {npl_vars}")
         lines.append("")
         
-        # Note about our parameterization vs Stata
-        lines.append("PARAMETERIZATION vs. Stata gologit2:")
-        lines.append("- Our cutpoints (α) have opposite sign for logit/probit: F(α - Xβ) vs F(-α + Xβ)")
-        lines.append("- Coefficient interpretations (β) are identical: same direction & magnitude")
-        lines.append("- Only the intercept/cutpoint signs differ between implementations")
+        # Parameterization note
+        lines.append("PARAMETERIZATION:")
+        lines.append("- We use the standard form P(Y≤j) = F(α_j − Xβ), consistent with Stata gologit2/ologit.")
         lines.append("")
         
         # Note about standard errors and diagnostics
@@ -1254,11 +1254,30 @@ class GeneralizedOrderedModel:
             return None
             
         try:
-            # 1. 计算Hessian逆（使用数值Hessian得到的协方差矩阵，即H^-1）
-            hessian_result = self.compute_numerical_hessian(X, y, result, method="3-point", verbose=False)
-            if hessian_result is None or 'cov_matrix' not in hessian_result:
-                return None
-            H_inv_free = hessian_result['cov_matrix']  # with respect to alpha_free, betas
+            # 1. 取得Hessian逆（优先使用优化器的hess_inv；否则用数值Hessian的协方差矩阵）
+            H_inv_free = None
+            res_used = result if result is not None else res
+            try:
+                if hasattr(res_used, 'hess_inv') and res_used.hess_inv is not None:
+                    H_inv_free = res_used.hess_inv
+                    # L-BFGS 可能返回稀疏线性算子
+                    if hasattr(H_inv_free, 'todense'):
+                        H_inv_free = np.asarray(H_inv_free.todense())
+                    else:
+                        H_inv_free = np.asarray(H_inv_free)
+            except Exception:
+                H_inv_free = None
+            if H_inv_free is None or not np.all(np.isfinite(H_inv_free)):
+                hessian_result = self.compute_numerical_hessian(X, y, result, method="3-point", verbose=False)
+                if hessian_result is None or 'cov_matrix' not in hessian_result:
+                    return None
+                H_inv_free = hessian_result['cov_matrix']  # with respect to alpha_free, betas
+            # 稳定化（对角线加小ridge以提高条件数）
+            try:
+                diag_eps = ridge * np.eye(H_inv_free.shape[0])
+                H_inv_free = H_inv_free + diag_eps
+            except Exception:
+                pass
             
             # 2. 计算簇级得分（将 O(n·p) 降为 O(G·p)）
             def compute_cluster_scores() -> Optional[np.ndarray]:

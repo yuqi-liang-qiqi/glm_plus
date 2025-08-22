@@ -1,21 +1,16 @@
 country,model_type,variable,threshold,threshold_readable,coefficient,std_error,p_value,significant_05,significant_01
-us,Full_Model,internationalization_Multinational,cut1,Junior→Assistant,0.18899149286300285,0.137223407362505,0.16843371783553973,False,False
-us,Full_Model,internationalization_Multinational,cut2,Assistant→Regular,0.4249016093134086,0.25203687100063793,0.09182068115258613,False,False
-us,Full_Model,internationalization_Multinational,cut3,Regular→Senior,0.1511256643773757,0.050638803900743275,0.002841494020977997,True,True
-us,Full_Model,internationalization_Multinational,cut4,Senior→Leader,0.11295095860305394,0.05819770761288445,0.05228077367090389,False,False
-us,Full_Model,internationalization_Multinational,cut5,Leader→Chief/founder,-0.612795027319418,0.8434107288082272,0.46749079630011936,False,False
-us,Full_Model,internationalization_International,cut1,Junior→Assistant,0.2743987883253617,0.6514057558612227,0.6735791347405502,False,False
-us,Full_Model,internationalization_International,cut2,Assistant→Regular,-0.08080096489023321,0.2347253705866656,0.7306686754572764,False,False
-us,Full_Model,internationalization_International,cut3,Regular→Senior,0.06366556791202009,0.27312629886285394,0.8156842449041755,False,False
-us,Full_Model,internationalization_International,cut4,Senior→Leader,-0.1737962288156858,0.3772682769336671,0.6450352833518505,False,False
-us,Full_Model,internationalization_International,cut5,Leader→Chief/founder,-0.4531754464684743,0.7312935621331048,0.5354617754871411,False,False
-india,Full_Model,highest_educational_degree_Advanced Degree,cut1,Junior→Assistant,0.057989902949387724,0.03954238568679237,0.1425052757454086,False,False
-india,Full_Model,highest_educational_degree_Advanced Degree,cut2,Assistant→Regular,0.2034266777747764,0.07931421271847128,0.010322934663676397,True,False
-india,Full_Model,highest_educational_degree_Advanced Degree,cut3,Regular→Senior,0.2062748272673073,0.03608128585731882,1.0845442321993914e-08,True,True
-india,Full_Model,highest_educational_degree_Advanced Degree,cut4,Senior→Leader,0.03835372756080626,0.01757808500538376,0.029116477579177902,True,False
-india,Full_Model,highest_educational_degree_Advanced Degree,cut5,Leader→Chief/founder,0.04703482021967106,0.028721118048945386,0.10149704291187289,False,False
-india,Full_Model,internationalization_International,cut1,Junior→Assistant,0.13651046403386166,0.07158761836484004,0.056533475637765784,False,False
-india,Full_Model,internationalization_International,cut2,Assistant→Regular,0.17531920023978062,0.06619251144026303,0.008081973960414102,True,True
-india,Full_Model,internationalization_International,cut3,Regular→Senior,-0.1455045340659811,0.05304785837788743,0.00609007548159024,True,True
-india,Full_Model,internationalization_International,cut4,Senior→Leader,-0.17950412244714542,0.06924181533235749,0.009530232119337567,True,True
-india,Full_Model,internationalization_International,cut5,Leader→Chief/founder,-0.019348215264870145,0.015525326839262934,0.2126779068673037,False,False
+us,Full_Model,rarity_score_z_x_gender_female,cut1,Junior→Assistant,0.13630757263007284,0.1641054994855662,0.4061943153070322,False,False
+us,Full_Model,rarity_score_z_x_gender_female,cut2,Assistant→Regular,-0.007478262804273818,0.013729843865745595,0.5859790612004585,False,False
+us,Full_Model,rarity_score_z_x_gender_female,cut3,Regular→Senior,0.015119100275980887,0.02052663840760697,0.4613899825718486,False,False
+us,Full_Model,rarity_score_z_x_gender_female,cut4,Senior→Leader,0.13003368135760315,0.05284922125239424,0.013875694297540209,True,False
+us,Full_Model,rarity_score_z_x_gender_female,cut5,Leader→Chief/founder,0.11608668559584927,0.06530374266158562,0.0754626462485144,False,False
+india,Full_Model,rarity_score_z,cut1,Junior→Assistant,-0.19965004812717702,0.008654579223540796,0.0,True,True
+india,Full_Model,rarity_score_z,cut2,Assistant→Regular,-0.15529750540840492,0.00816173475883688,0.0,True,True
+india,Full_Model,rarity_score_z,cut3,Regular→Senior,0.05787956442480166,0.003433754157181016,0.0,True,True
+india,Full_Model,rarity_score_z,cut4,Senior→Leader,0.2882793228292798,0.004465489993427475,0.0,True,True
+india,Full_Model,rarity_score_z,cut5,Leader→Chief/founder,-0.12092014496861976,0.028567755508056205,2.3085186972915395e-05,True,True
+india,Full_Model,internationalization_Multinational,cut1,Junior→Assistant,-0.24859181087836704,0.015287067087507995,0.0,True,True
+india,Full_Model,internationalization_Multinational,cut2,Assistant→Regular,-0.376472193352924,0.013755634402485792,0.0,True,True
+india,Full_Model,internationalization_Multinational,cut3,Regular→Senior,-0.008492732307652795,0.006746691868933431,0.20810276334037825,False,False
+india,Full_Model,internationalization_Multinational,cut4,Senior→Leader,0.05983989102518662,0.008649074959965947,4.559685962135518e-12,True,True
+india,Full_Model,internationalization_Multinational,cut5,Leader→Chief/founder,-0.35600540581229084,0.0492669039327578,4.971578704271451e-13,True,True

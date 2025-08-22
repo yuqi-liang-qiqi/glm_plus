@@ -9,6 +9,7 @@ import numpy as np
 import os
 import argparse
 from scipy import stats
+from joblib import Parallel, delayed, parallel_backend
 
 # 解析参数并设置默认 CSV 路径（脚本同目录）
 script_dir = "/Users/lei/Documents/Sequenzo_all_folders/sequenzo_local/test_data/real_data_my_paper/250808_tree/"
@@ -21,6 +22,8 @@ parser.add_argument("--bootstrap-n", dest="bootstrap_n", type=int, default=200, 
 # 默认开启聚类自助（按 worker_id）；可用 --no-bootstrap-cluster 关闭
 parser.add_argument("--bootstrap-cluster", dest="bootstrap_cluster", action="store_true", default=True, help="Use cluster (worker_id) bootstrap (use --no-bootstrap-cluster to disable)")
 parser.add_argument("--no-bootstrap-cluster", dest="bootstrap_cluster", action="store_false")
+# 并行进程数（默认8；建议8-12）
+parser.add_argument("--bootstrap-jobs", dest="bootstrap_jobs", type=int, default=min(8, os.cpu_count() or 8), help="Parallel jobs for bootstrap (e.g., 8-12)")
 args = parser.parse_args()
 
 final_df = pd.read_csv(args.final_csv)
@@ -138,9 +141,11 @@ print(f"- 国家分布: {lag_df['country'].value_counts().to_dict()}")
 # 处理性别变量
 if 'gender' in lag_df.columns:
     lag_df['gender'] = lag_df['gender'].astype(str).str.strip().str.lower()
-    lag_df['gender_female'] = lag_df['gender'].map({'female': 1.0, 'male': 0.0})
+    lag_df['gender_missing'] = ~lag_df['gender'].isin(['female','male'])
+    lag_df['gender_female'] = lag_df['gender'].map({'female': 1.0, 'male': 0.0}).fillna(0.0)
 else:
-    lag_df['gender_female'] = np.nan
+    lag_df['gender_missing'] = False
+    lag_df['gender_female'] = 0.0
 
 # 控制变量集合（排除主键与因变量/主解释变量）
 exclude = set([
@@ -189,7 +194,7 @@ def compute_ordered_marginal_effects(model_obj, X_df, var_name, seniority_levels
         # 使用数值近似计算边际效应
         dx = 1e-4
         # 采样以加速计算
-        max_sample = 5000
+        max_sample = 3000
         if len(X_df) > max_sample:
             X_s = X_df.sample(n=max_sample, random_state=123).copy()
         else:
@@ -339,6 +344,55 @@ def compute_ame_expected(model_obj, X_df, var_name):
     except Exception as e:
         return np.nan, f'error: {e}'
 
+# === 并行Bootstrap工作函数（模块级，便于joblib序列化；使用numpy数组避免跨进程拷贝） ===
+def _bootstrap_single_rep(boot_idx, X_np, y_np, link, pl_vars, feat_names, var_name):
+    try:
+        X_b = X_np[boot_idx]
+        y_b = y_np[boot_idx]
+        boot_model = GeneralizedOrderedModel(link=link, pl_vars=pl_vars)
+        boot_res = boot_model.fit(
+            X_b,
+            y_b,
+            feature_names=feat_names,
+            verbose=False,
+            compute_se=False,
+            maxiter=1000
+        )
+        if not getattr(boot_res, 'success', False):
+            return None
+        # 由于 compute_ame_expected 需要 DataFrame 列名来识别变量，这里只在主进程上使用；
+        # 在自助复制中我们只用模型预测端口直接算概率差，避免构造DataFrame的开销。
+        # 但当前实现依赖 compute_ame_expected 的稳定性，这里仍调用其接口，构造最小DataFrame。
+        # 注：列名顺序与 feat_names 对齐。
+        import pandas as _pd
+        import numpy as _np
+        X_b_df = _pd.DataFrame(X_b, columns=feat_names)
+        ame_b, _ = compute_ame_expected(boot_model, X_b_df, var_name)
+        # subgroup AME by gender (if available)
+        ame_male = _np.nan
+        ame_fem = _np.nan
+        try:
+            if 'gender_female' in X_b_df.columns:
+                male_mask = X_b_df['gender_female'].astype(float).fillna(0.0).values == 0.0
+                fem_mask = X_b_df['gender_female'].astype(float).fillna(0.0).values == 1.0
+                if male_mask.any():
+                    ame_male, _ = compute_ame_expected(boot_model, X_b_df.loc[male_mask], var_name)
+                if fem_mask.any():
+                    ame_fem, _ = compute_ame_expected(boot_model, X_b_df.loc[fem_mask], var_name)
+        except Exception:
+            pass
+        dpr_ge_b = boot_res.dPr_ge_by_threshold(X_b, var_name)
+        dpr_cat_b = boot_res.dPr_cat_by_threshold(X_b, var_name)
+        return {
+            'ame': ame_b,
+            'ame_male': ame_male,
+            'ame_female': ame_fem,
+            'dpr_ge': dpr_ge_b,
+            'dpr_cat': dpr_cat_b
+        }
+    except Exception:
+        return None
+
 print(f"\n开始分国家回归分析...")
 
 for ctry in countries:
@@ -405,6 +459,9 @@ for ctry in countries:
         year_dummies = pd.get_dummies(year_cat, drop_first=True, prefix='year', dtype=float)
         if not year_dummies.empty:
             X_parts.append(year_dummies)
+    # 缺失性别指示
+    if 'gender_missing' in dfc.columns:
+        X_parts.append(dfc[['gender_missing']].astype(float))
 
     X = pd.concat(X_parts, axis=1)
     # 去重列名，防止重复列导致后续 dtype 检查把列切成 DataFrame
@@ -551,7 +608,7 @@ for ctry in countries:
                 """快速拟合函数：只算对数似然，不算SE"""
                 mdl = GeneralizedOrderedModel(link='logit', pl_vars=pl_vars)
                 res = mdl.fit(X_final.values, y_clean.values, feature_names=all_feats,
-                              verbose=False, maxiter=300, tol=1e-4, compute_se=False)
+                              verbose=False, maxiter=1000, tol=1e-5, compute_se=False)
                 LL = -float(res.fun) if res.success else -np.inf   # res.fun 是 NLL
                 return mdl, res, LL
 
@@ -588,11 +645,13 @@ for ctry in countries:
                         
                         if res1.success:
                             LR = 2*(LL1 - LL0)
-                            df = len(baseline_res.alphas) - 2  # 正确自由度：每个NPL变量从parallel(1参数)变non-parallel(K-1参数)，净增K-2参数
+                            K = len(baseline_res.alphas)
+                            df = K - 1  # 并行->非并行：净增 (K-1) 个参数
                             from scipy.stats import chi2
                             p = 1 - chi2.cdf(max(0, LR), df) if LR > 0 else 1.0
-                            
-                            print(f"  {ctry}: {v}: ΔLL={LL1-LL0:.3f}, LR={LR:.2f}, p={p:.4f}")
+                            dll = max(0.0, LL1 - LL0)
+                            LR = max(0.0, LR)
+                            print(f"  {ctry}: {v}: ΔLL={dll:.3f}, LR={LR:.2f}, p={p:.4f}")
                             best = max(best or (None,-1e9,1.0,None), (v, LR, p, res1), key=lambda t: t[1])
                         else:
                             print(f"  {ctry}: {v}: 模型拟合失败")
@@ -602,7 +661,8 @@ for ctry in countries:
                         if p < alpha:
                             npl_now.append(v)
                             pl_now.remove(v) 
-                            LL0 += LR/2  # 更新基线LL
+                            LL0 = LL1   # 基线LL直接替换为选中模型的LL
+                            baseline_res = res1
                             cands.remove(v)
                             improvement_log.append((v, LR, p))
                             print(f"  {ctry}: -> 选择 {v} (p={p:.4f}, ΔLL={LR/2:.3f})")
@@ -659,7 +719,8 @@ for ctry in countries:
             models[(ctry,'ordered_logit_lag')] = model  # 存储拟合好的模型对象
             models[(ctry,'ordered_logit_lag_result')] = res  # 存储结果对象
 
-            # 从gologit2结果中提取系数信息（不再作为主口径展示）
+            # 从gologit2结果中提取系数信息（不再作为主口径展示）。
+            # 优先：若变量为parallel，用beta_pl；否则取non-parallel的第1阈值。
             coef = np.nan
             se = np.nan  
             pval = np.nan
@@ -673,25 +734,26 @@ for ctry in countries:
             if 'rarity_score_z' in npl_names:
                 var_idx = npl_names.index('rarity_score_z')  # 在非平行变量列表中的正确索引
                 print(f"  {ctry}: rarity_score_z index in npl_names: {var_idx}")
-                
-                # gologit2的beta_npl是 (K, p_npl) 形状，每个阈值都有系数
                 if res.beta_npl is not None:
                     print(f"  {ctry}: beta_npl shape: {res.beta_npl.shape}")
-                    if var_idx < res.beta_npl.shape[1]:  # 确保索引不越界
-                        coef = float(res.beta_npl[0, var_idx])  # 使用第一个阈值的系数作为代表
-                    else:
-                        print(f"  {ctry}: WARNING: var_idx {var_idx} >= beta_npl.shape[1] {res.beta_npl.shape[1]}")
-                
-                # 提取标准误和p值（如果可用）
-                if hasattr(res, 'se_beta_npl') and res.se_beta_npl is not None:
-                    if var_idx < res.se_beta_npl.shape[1]:
-                        se = float(res.se_beta_npl[0, var_idx])  # 第一个阈值的标准误
-                
-                if hasattr(res, 'pvalues_beta_npl') and res.pvalues_beta_npl is not None:
-                    if var_idx < res.pvalues_beta_npl.shape[1]:
-                        pval = float(res.pvalues_beta_npl[0, var_idx])  # 第一个阈值的p值
+                    if var_idx < res.beta_npl.shape[1]:
+                        coef = float(res.beta_npl[0, var_idx])
+                if hasattr(res, 'se_beta_npl') and res.se_beta_npl is not None and var_idx < res.se_beta_npl.shape[1]:
+                    se = float(res.se_beta_npl[0, var_idx])
+                if hasattr(res, 'pvalues_beta_npl') and res.pvalues_beta_npl is not None and var_idx < res.pvalues_beta_npl.shape[1]:
+                    pval = float(res.pvalues_beta_npl[0, var_idx])
             else:
-                print(f"  {ctry}: WARNING: rarity_score_z not found in non-parallel variables: {npl_names}")
+                # 若为parallel，从beta_pl中获取主效应
+                if hasattr(res, 'beta_pl') and res.beta_pl is not None and hasattr(res, 'pl_vars') and res.pl_vars:
+                    if 'rarity_score_z' in res.pl_vars:
+                        pl_idx = res.pl_vars.index('rarity_score_z')
+                        coef = float(res.beta_pl[pl_idx])
+                        if hasattr(res, 'se_beta_pl') and res.se_beta_pl is not None and pl_idx < len(res.se_beta_pl):
+                            se = float(res.se_beta_pl[pl_idx])
+                        if hasattr(res, 'pvalues_beta_pl') and res.pvalues_beta_pl is not None and pl_idx < len(res.pvalues_beta_pl):
+                            pval = float(res.pvalues_beta_pl[pl_idx])
+                else:
+                    print(f"  {ctry}: WARNING: rarity_score_z not found in non-parallel variables: {npl_names}")
             
             # 提取pseudo R2
             pseudo_r2 = getattr(res, 'pseudo_r2', np.nan)
@@ -700,6 +762,22 @@ for ctry in countries:
             # 计算期望职级的平均边际效应（AME）
             ame_rarity, ame_type = compute_ame_expected(model, X_final, 'rarity_score_z')
             models[(ctry,'ordered_logit_lag_ame_rarity')] = {'ame': ame_rarity, 'type': ame_type}
+            # 性别分组AME（若可用）
+            if 'gender_female' in X_final.columns:
+                try:
+                    male_mask = (dfc_valid['gender_female'].astype(float).fillna(0.0).values == 0.0)
+                    female_mask = (dfc_valid['gender_female'].astype(float).fillna(0.0).values == 1.0)
+                    if male_mask.any():
+                        ame_male, _ = compute_ame_expected(model, X_final.loc[male_mask], 'rarity_score_z')
+                    else:
+                        ame_male = np.nan
+                    if female_mask.any():
+                        ame_fem, _ = compute_ame_expected(model, X_final.loc[female_mask], 'rarity_score_z')
+                    else:
+                        ame_fem = np.nan
+                    models[(ctry,'ordered_logit_lag_ame_rarity_by_gender')] = {'male': ame_male, 'female': ame_fem}
+                except Exception:
+                    pass
             
             # === 门槛级别详细分析（新功能）===
             print(f"  {ctry}: 开始门槛级别分析...")
@@ -826,50 +904,60 @@ for ctry in countries:
 
             # === 可选：Cluster Bootstrap AME 与阈值效应（CI/SE/p）===
             if args.bootstrap_n and args.bootstrap_n > 0:
-                print(f"  {ctry}: 启动Bootstrap (n={args.bootstrap_n}, cluster={args.bootstrap_cluster}) 以估计AME与阈值/类别效应的CI/SE/p…")
+                print(f"  {ctry}: 启动Bootstrap并行计算 (n={args.bootstrap_n}, cluster={args.bootstrap_cluster}, jobs={args.bootstrap_jobs}) 以估计AME与阈值/类别效应的CI/SE/p…")
                 rng = np.random.RandomState(20250820)
-                ame_boot = []
-                dpr_ge_boot = []  # list of Series indexed by threshold
-                dpr_cat_boot = []  # list of Series indexed by category (Y=0..J-1)
                 pl_vars_current = model.pl_vars
                 feat_names_current = feature_names
                 link_current = model.link
                 clusters_all = pd.Series(cluster)
+
+                # 预先生成自助样本索引（确定性）
+                boot_indices = []
                 for b in range(int(args.bootstrap_n)):
-                    try:
-                        if args.bootstrap_cluster:
-                            uniq = clusters_all.unique()
-                            sampled = rng.choice(uniq, size=len(uniq), replace=True)
-                            parts = []
-                            for g in sampled:
-                                idx = clusters_all.index[clusters_all == g]
-                                parts.append(idx.values)
-                            if not parts:
-                                continue
+                    if args.bootstrap_cluster:
+                        uniq = clusters_all.unique()
+                        sampled = rng.choice(uniq, size=len(uniq), replace=True)
+                        parts = []
+                        for g in sampled:
+                            idx = clusters_all.index[clusters_all == g]
+                            parts.append(idx.values)
+                        if parts:
                             boot_idx = np.concatenate(parts)
                         else:
-                            boot_idx = rng.choice(len(y_clean), size=len(y_clean), replace=True)
-                        X_b = X_final.iloc[boot_idx]
-                        y_b = y_clean.iloc[boot_idx]
-                        boot_model = GeneralizedOrderedModel(link=link_current, pl_vars=pl_vars_current)
-                        boot_res = boot_model.fit(
-                            X_b.values,
-                            y_b.values,
-                            feature_names=feat_names_current,
-                            verbose=False,
-                            compute_se=False,
-                            maxiter=1000
-                        )
-                        if not boot_res.success:
-                            continue
-                        ame_b, _ = compute_ame_expected(boot_model, X_b, 'rarity_score_z')
-                        ame_boot.append(ame_b)
-                        dpr_b = boot_res.dPr_ge_by_threshold(X_b.values, 'rarity_score_z')
-                        dpr_ge_boot.append(dpr_b)
-                        dpr_cat_b = boot_res.dPr_cat_by_threshold(X_b.values, 'rarity_score_z')
-                        dpr_cat_boot.append(dpr_cat_b)
-                    except Exception:
-                        continue
+                            boot_idx = np.array([], dtype=int)
+                    else:
+                        boot_idx = rng.choice(len(y_clean), size=len(y_clean), replace=True)
+                    boot_indices.append(boot_idx)
+
+                # 准备numpy数组以启用memmap并减少跨进程拷贝
+                X_np = X_final.values.astype(float)
+                y_np = y_clean.values.astype(int)
+                # 并行执行（锁内层BLAS线程；大数组memmap；小批次避免长任务阻塞）
+                with parallel_backend("loky", inner_max_num_threads=1):
+                    results_boot = Parallel(
+                        n_jobs=int(args.bootstrap_jobs),
+                        prefer="processes",
+                        batch_size=1,
+                        max_nbytes="50M",
+                        temp_folder="/tmp/joblib"
+                    )(
+                        delayed(_bootstrap_single_rep)(
+                            boot_idx,
+                            X_np,
+                            y_np,
+                            link_current,
+                            pl_vars_current,
+                            feat_names_current,
+                            'rarity_score_z'
+                        ) for boot_idx in boot_indices
+                    )
+
+                # 汇总成功结果
+                ame_boot = [r['ame'] for r in results_boot if r is not None]
+                ame_male_boot = [r.get('ame_male', np.nan) for r in results_boot if r is not None]
+                ame_fem_boot = [r.get('ame_female', np.nan) for r in results_boot if r is not None]
+                dpr_ge_boot = [r['dpr_ge'] for r in results_boot if r is not None]
+                dpr_cat_boot = [r['dpr_cat'] for r in results_boot if r is not None]
 
                 # AME CI/SE/p
                 if len(ame_boot) > 0:
@@ -885,6 +973,16 @@ for ctry in countries:
                     ame_ci = (np.nan, np.nan)
                     ame_se = np.nan
                     ame_p = np.nan
+
+                # subgroup AME CI
+                def _ci_of_list(vals):
+                    arr = np.asarray(vals, dtype=float)
+                    arr = arr[np.isfinite(arr)]
+                    if arr.size == 0:
+                        return (np.nan, np.nan)
+                    return (float(np.nanpercentile(arr, 2.5)), float(np.nanpercentile(arr, 97.5)))
+                ame_male_ci = _ci_of_list(ame_male_boot)
+                ame_fem_ci = _ci_of_list(ame_fem_boot)
 
                 # dPr(Y≥j)/dx CI/SE/p
                 dpr_ci = None
@@ -936,6 +1034,8 @@ for ctry in countries:
                     'ame_ci': ame_ci,
                     'ame_se': ame_se,
                     'ame_p': ame_p,
+                    'ame_male_ci': ame_male_ci,
+                    'ame_female_ci': ame_fem_ci,
                     'dpr_ge_ci': dpr_ci,
                     'dpr_ge_se': dpr_se_series,
                     'dpr_ge_p': dpr_p_series,
@@ -943,7 +1043,7 @@ for ctry in countries:
                     'dpr_cat_se': dpr_cat_se_series,
                     'dpr_cat_p': dpr_cat_p_series
                 }
-                print(f"  {ctry}: Bootstrap完成，有效复制 {len(ame_boot)}/{args.bootstrap_n} 次；AME 95%CI={ame_ci}，SE={ame_se if np.isfinite(ame_se) else 'NA'}，p={ame_p if np.isfinite(ame_p) else 'NA'}")
+                print(f"  {ctry}: Bootstrap完成（并行），有效复制 {len(ame_boot)}/{args.bootstrap_n} 次；AME 95%CI={ame_ci}，SE={ame_se if np.isfinite(ame_se) else 'NA'}，p={ame_p if np.isfinite(ame_p) else 'NA'}")
             
         except Exception as e:
             print(f"⚠ {ctry}: gologit2回归失败: {str(e)}")
@@ -1125,7 +1225,8 @@ for ctry in countries:
             models[(ctry,'ordered_logit_lag_simple')] = model_simple
             models[(ctry,'ordered_logit_lag_simple_result')] = res_simple
 
-            # 从简化模型结果中提取系数信息（不再作为主口径展示）
+            # 从简化模型结果中提取系数信息（不再作为主口径展示）。
+            # 优先：若变量为parallel，用beta_pl；否则取non-parallel的第1阈值。
             coef = np.nan
             se = np.nan  
             pval = np.nan
@@ -1136,26 +1237,25 @@ for ctry in countries:
             print(f"  {ctry}: 简化模型 Non-parallel variable order (from model): {npl_names_simple}")
             
             if 'rarity_score_z' in npl_names_simple:
-                var_idx = npl_names_simple.index('rarity_score_z')  # 在非平行变量列表中的正确索引
+                var_idx = npl_names_simple.index('rarity_score_z')
                 print(f"  {ctry}: 简化模型 rarity_score_z index in npl_names: {var_idx}")
-                
-                if res_simple.beta_npl is not None:
-                    print(f"  {ctry}: 简化模型 beta_npl shape: {res_simple.beta_npl.shape}")
-                    if var_idx < res_simple.beta_npl.shape[1]:  # 确保索引不越界
-                        coef = float(res_simple.beta_npl[0, var_idx])  # 使用第一个阈值的系数作为代表
-                    else:
-                        print(f"  {ctry}: 简化模型 WARNING: var_idx {var_idx} >= beta_npl.shape[1] {res_simple.beta_npl.shape[1]}")
-                
-                # 提取标准误和p值（如果可用）
-                if hasattr(res_simple, 'se_beta_npl') and res_simple.se_beta_npl is not None:
-                    if var_idx < res_simple.se_beta_npl.shape[1]:
-                        se = float(res_simple.se_beta_npl[0, var_idx])  # 第一个阈值的标准误
-                
-                if hasattr(res_simple, 'pvalues_beta_npl') and res_simple.pvalues_beta_npl is not None:
-                    if var_idx < res_simple.pvalues_beta_npl.shape[1]:
-                        pval = float(res_simple.pvalues_beta_npl[0, var_idx])  # 第一个阈值的p值
+                if res_simple.beta_npl is not None and var_idx < res_simple.beta_npl.shape[1]:
+                    coef = float(res_simple.beta_npl[0, var_idx])
+                if hasattr(res_simple, 'se_beta_npl') and res_simple.se_beta_npl is not None and var_idx < res_simple.se_beta_npl.shape[1]:
+                    se = float(res_simple.se_beta_npl[0, var_idx])
+                if hasattr(res_simple, 'pvalues_beta_npl') and res_simple.pvalues_beta_npl is not None and var_idx < res_simple.pvalues_beta_npl.shape[1]:
+                    pval = float(res_simple.pvalues_beta_npl[0, var_idx])
             else:
-                print(f"  {ctry}: 简化模型 WARNING: rarity_score_z not found in non-parallel variables: {npl_names_simple}")
+                if hasattr(res_simple, 'beta_pl') and res_simple.beta_pl is not None and hasattr(res_simple, 'pl_vars') and res_simple.pl_vars:
+                    if 'rarity_score_z' in res_simple.pl_vars:
+                        pl_idx = res_simple.pl_vars.index('rarity_score_z')
+                        coef = float(res_simple.beta_pl[pl_idx])
+                        if hasattr(res_simple, 'se_beta_pl') and res_simple.se_beta_pl is not None and pl_idx < len(res_simple.se_beta_pl):
+                            se = float(res_simple.se_beta_pl[pl_idx])
+                        if hasattr(res_simple, 'pvalues_beta_pl') and res_simple.pvalues_beta_pl is not None and pl_idx < len(res_simple.pvalues_beta_pl):
+                            pval = float(res_simple.pvalues_beta_pl[pl_idx])
+                else:
+                    print(f"  {ctry}: 简化模型 WARNING: rarity_score_z not found in non-parallel variables: {npl_names_simple}")
             
             # 提取pseudo R2
             pseudo_r2 = getattr(res_simple, 'pseudo_r2', np.nan)
@@ -1164,6 +1264,22 @@ for ctry in countries:
             # 简化模型的期望值AME
             ame_rarity_s, ame_type_s = compute_ame_expected(model_simple, X_simple_clean, 'rarity_score_z')
             models[(ctry,'ordered_logit_lag_simple_ame_rarity')] = {'ame': ame_rarity_s, 'type': ame_type_s}
+            # 简化模型性别分组AME（若可用）
+            if 'gender_female' in X_simple_clean.columns:
+                try:
+                    male_mask = (dfc.loc[mask, 'gender_female'].astype(float).fillna(0.0).values == 0.0)
+                    female_mask = (dfc.loc[mask, 'gender_female'].astype(float).fillna(0.0).values == 1.0)
+                    if male_mask.any():
+                        ame_male_s, _ = compute_ame_expected(model_simple, X_simple_clean.loc[male_mask], 'rarity_score_z')
+                    else:
+                        ame_male_s = np.nan
+                    if female_mask.any():
+                        ame_fem_s, _ = compute_ame_expected(model_simple, X_simple_clean.loc[female_mask], 'rarity_score_z')
+                    else:
+                        ame_fem_s = np.nan
+                    models[(ctry,'ordered_logit_lag_simple_ame_rarity_by_gender')] = {'male': ame_male_s, 'female': ame_fem_s}
+                except Exception:
+                    pass
             
             # === 简化模型门槛级别详细分析 ===
             print(f"  {ctry}: 简化模型门槛级别分析...")
@@ -1266,52 +1382,58 @@ for ctry in countries:
             models[(ctry, 'ordered_logit_lag_simple_ape_allvars')] = per_var_ape_simple
             print(f"  {ctry}: 简化模型边际效应计算完成")
             
-            # === 可选：简化模型的Bootstrap（CI/SE/p）===
+            # === 可选：简化模型的Bootstrap（CI/SE/p）— 并行 ===
             if args.bootstrap_n and args.bootstrap_n > 0:
-                print(f"  {ctry}: [简化模型] 启动Bootstrap (n={args.bootstrap_n}, cluster={args.bootstrap_cluster}) 以估计AME与阈值/类别效应的CI/SE/p…")
+                print(f"  {ctry}: [简化模型] 启动Bootstrap并行计算 (n={args.bootstrap_n}, cluster={args.bootstrap_cluster}, jobs={args.bootstrap_jobs}) 以估计AME与阈值/类别效应的CI/SE/p…")
                 rng = np.random.RandomState(20250820)
-                ame_boot = []
-                dpr_ge_boot = []
-                dpr_cat_boot = []
                 pl_vars_current = model_simple.pl_vars
                 feat_names_current = feature_names_simple
                 link_current = model_simple.link
                 clusters_all = pd.Series(cluster_simple)
+
+                # 预先生成索引（确定性）
+                boot_indices = []
                 for b in range(int(args.bootstrap_n)):
-                    try:
-                        if args.bootstrap_cluster:
-                            uniq = clusters_all.unique()
-                            sampled = rng.choice(uniq, size=len(uniq), replace=True)
-                            parts = []
-                            for g in sampled:
-                                idx = clusters_all.index[clusters_all == g]
-                                parts.append(idx.values)
-                            if not parts:
-                                continue
+                    if args.bootstrap_cluster:
+                        uniq = clusters_all.unique()
+                        sampled = rng.choice(uniq, size=len(uniq), replace=True)
+                        parts = []
+                        for g in sampled:
+                            idx = clusters_all.index[clusters_all == g]
+                            parts.append(idx.values)
+                        if parts:
                             boot_idx = np.concatenate(parts)
                         else:
-                            boot_idx = rng.choice(len(y_simple_clean), size=len(y_simple_clean), replace=True)
-                        X_b = X_simple_clean.iloc[boot_idx]
-                        y_b = y_simple_clean.iloc[boot_idx]
-                        boot_model = GeneralizedOrderedModel(link=link_current, pl_vars=pl_vars_current)
-                        boot_res = boot_model.fit(
-                            X_b.values,
-                            y_b.values,
-                            feature_names=feat_names_current,
-                            verbose=False,
-                            compute_se=False,
-                            maxiter=1000
-                        )
-                        if not boot_res.success:
-                            continue
-                        ame_b, _ = compute_ame_expected(boot_model, X_b, 'rarity_score_z')
-                        ame_boot.append(ame_b)
-                        dpr_b = boot_res.dPr_ge_by_threshold(X_b.values, 'rarity_score_z')
-                        dpr_ge_boot.append(dpr_b)
-                        dpr_cat_b = boot_res.dPr_cat_by_threshold(X_b.values, 'rarity_score_z')
-                        dpr_cat_boot.append(dpr_cat_b)
-                    except Exception:
-                        continue
+                            boot_idx = np.array([], dtype=int)
+                    else:
+                        boot_idx = rng.choice(len(y_simple_clean), size=len(y_simple_clean), replace=True)
+                    boot_indices.append(boot_idx)
+
+                # 准备numpy数组
+                X_np = X_simple_clean.values.astype(float)
+                y_np = y_simple_clean.values.astype(int)
+                with parallel_backend("loky", inner_max_num_threads=1):
+                    results_boot = Parallel(
+                        n_jobs=int(args.bootstrap_jobs),
+                        prefer="processes",
+                        batch_size=1,
+                        max_nbytes="50M",
+                        temp_folder="/tmp/joblib"
+                    )(
+                        delayed(_bootstrap_single_rep)(
+                            boot_idx,
+                            X_np,
+                            y_np,
+                            link_current,
+                            pl_vars_current,
+                            feat_names_current,
+                            'rarity_score_z'
+                        ) for boot_idx in boot_indices
+                    )
+
+                ame_boot = [r['ame'] for r in results_boot if r is not None]
+                dpr_ge_boot = [r['dpr_ge'] for r in results_boot if r is not None]
+                dpr_cat_boot = [r['dpr_cat'] for r in results_boot if r is not None]
 
                 # AME CI/SE/p
                 if len(ame_boot) > 0:
@@ -1385,7 +1507,7 @@ for ctry in countries:
                     'dpr_cat_se': dpr_cat_se_series,
                     'dpr_cat_p': dpr_cat_p_series
                 }
-                print(f"  {ctry}: [简化模型] Bootstrap完成，有效复制 {len(ame_boot)}/{args.bootstrap_n} 次；AME 95%CI={ame_ci}，SE={ame_se if np.isfinite(ame_se) else 'NA'}，p={ame_p if np.isfinite(ame_p) else 'NA'}")
+                print(f"  {ctry}: [简化模型] Bootstrap完成（并行），有效复制 {len(ame_boot)}/{args.bootstrap_n} 次；AME 95%CI={ame_ci}，SE={ame_se if np.isfinite(ame_se) else 'NA'}，p={ame_p if np.isfinite(ame_p) else 'NA'}")
             
         except Exception as e2:
             print(f"✗ {ctry}: 所有时间滞后gologit2回归方法都失败了: {str(e2)}")
@@ -1397,7 +1519,7 @@ print('时间滞后回归结果：t年rarity_score预测t+1年seniority')
 print('='*60)
 print(lag_results_summary)
 
-# === 系统化输出逐阈值系数表到CSV文件 ===
+# === 系统化输出逐阈值系数表到CSV文件（包含parallel与non-parallel变量） ===
 threshold_coef_data = []
 
 print(f"\n生成逐阈值系数表...")
@@ -1417,36 +1539,43 @@ for ctry in countries:
         print(f"  {ctry}: 无可用结果对象")
         continue
     
-    # 获取非并行变量
-    if hasattr(result_obj, 'pl_vars') and result_obj.pl_vars:
-        npl_vars = [v for v in result_obj.feature_names if v not in result_obj.pl_vars]
-    else:
-        npl_vars = result_obj.feature_names  # 全部非并行
+    # 处理所有变量（包括parallel变量）
+    var_list = list(result_obj.feature_names)
+    print(f"  {ctry}: 处理 {len(var_list)} 个变量（含parallel): {var_list}")
     
-    if not npl_vars:
-        print(f"  {ctry}: 无非并行变量")
-        continue
-        
-    print(f"  {ctry}: 处理 {len(npl_vars)} 个非并行变量: {npl_vars}")
-    
-    # 为每个非并行变量生成阈值系数行
-    for var in npl_vars:
+    # 为每个变量生成阈值系数行
+    for var in var_list:
         try:
             coef_by_threshold = result_obj.coef_by_threshold(var)
             
-            # 提取标准误和p值（如果可用）
+            # 提取标准误和p值（parallel变量需复制K次）
             se_by_threshold = None
             pval_by_threshold = None
-            
-            if hasattr(result_obj, 'se_beta_npl') and result_obj.se_beta_npl is not None:
-                var_idx = npl_vars.index(var)
-                if var_idx < result_obj.se_beta_npl.shape[1]:
-                    se_by_threshold = result_obj.se_beta_npl[:, var_idx]
-            
-            if hasattr(result_obj, 'pvalues_beta_npl') and result_obj.pvalues_beta_npl is not None:
-                var_idx = npl_vars.index(var)
-                if var_idx < result_obj.pvalues_beta_npl.shape[1]:
-                    pval_by_threshold = result_obj.pvalues_beta_npl[:, var_idx]
+            K = len(coef_by_threshold)
+            if hasattr(result_obj, 'pl_vars') and result_obj.pl_vars and var in result_obj.pl_vars:
+                # parallel: 单个SE复制到所有cut
+                if hasattr(result_obj, 'se_beta_pl') and result_obj.se_beta_pl is not None:
+                    pl_idx = result_obj.pl_vars.index(var)
+                    se_val = result_obj.se_beta_pl[pl_idx] if pl_idx < len(result_obj.se_beta_pl) else np.nan
+                    se_by_threshold = np.repeat(se_val, K)
+                if hasattr(result_obj, 'pvalues_beta_pl') and result_obj.pvalues_beta_pl is not None:
+                    pl_idx = result_obj.pl_vars.index(var)
+                    p_val = result_obj.pvalues_beta_pl[pl_idx] if pl_idx < len(result_obj.pvalues_beta_pl) else np.nan
+                    pval_by_threshold = np.repeat(p_val, K)
+            else:
+                # non-parallel: 直接取每阈值SE
+                if hasattr(result_obj, 'se_beta_npl') and result_obj.se_beta_npl is not None:
+                    npl_vars_all = [v for v in result_obj.feature_names if not (hasattr(result_obj, 'pl_vars') and result_obj.pl_vars and v in result_obj.pl_vars)]
+                    if var in npl_vars_all:
+                        var_idx = npl_vars_all.index(var)
+                        if var_idx < result_obj.se_beta_npl.shape[1]:
+                            se_by_threshold = result_obj.se_beta_npl[:, var_idx]
+                if hasattr(result_obj, 'pvalues_beta_npl') and result_obj.pvalues_beta_npl is not None:
+                    npl_vars_all = [v for v in result_obj.feature_names if not (hasattr(result_obj, 'pl_vars') and result_obj.pl_vars and v in result_obj.pl_vars)]
+                    if var in npl_vars_all:
+                        var_idx = npl_vars_all.index(var)
+                        if var_idx < result_obj.pvalues_beta_npl.shape[1]:
+                            pval_by_threshold = result_obj.pvalues_beta_npl[:, var_idx]
             
             # 生成每个阈值的记录
             for i, (cut_name, coef_val) in enumerate(coef_by_threshold.items()):
@@ -1515,7 +1644,8 @@ with open(report_path, "w", encoding="utf-8") as f:
     f.write("- Generalized ordered model (gologit2) is appropriate for ordinal outcomes\n")
     f.write("- Allows different coefficients across thresholds (non-proportional odds)\n")
     f.write("- Interpretation prioritizes AME and probability effects (dPr(Y≥j)/dx, dPr(Y=c)/dx); coefficients are threshold-specific in PPOM and serve as supplementary outputs\n")
-    f.write("- Standard errors are cluster-robust by worker_id with HC1 correction by default (BHHH/Sandwich); numerical Hessian is used only as a last fallback and is NOT the primary method\n")
+    f.write("- Standard errors are cluster-robust by worker_id (Sandwich HC1 when clustered).\n")
+    f.write("  If bootstrap is enabled, we also report percentile 95% CIs. Wald p-values use bootstrap SEs.\n")
     f.write("- P-values based on z-tests (coefficient/standard error)\n")
     f.write("- Pseudo R² is McFadden's R² = 1 - (logL_full/logL_null)\n")
     f.write("- Note: gologit2 uses different parameterization than standard ordered logit\n\n")
@@ -1558,6 +1688,20 @@ with open(report_path, "w", encoding="utf-8") as f:
                     f.write(f"  SE (bootstrap): {ame_se:.6f}\n")
                 if np.isfinite(ame_p):
                     f.write(f"  p-value (z, H0=0): {ame_p:.4f}\n")
+            # 性别分组 AME
+            ame_gender_key = (ctry, 'ordered_logit_lag_ame_rarity_by_gender') if (ctry, 'ordered_logit_lag_ame_rarity_by_gender') in models else (
+                              (ctry, 'ordered_logit_lag_simple_ame_rarity_by_gender') if (ctry, 'ordered_logit_lag_simple_ame_rarity_by_gender') in models else None)
+            if ame_gender_key is not None:
+                g = models[ame_gender_key]
+                male_ame = g.get('male', np.nan)
+                fem_ame = g.get('female', np.nan)
+                f.write(f"  AME(E[Y]) by gender (per +1 SD): male={male_ame:.6f}, female={fem_ame:.6f}\n")
+                ci_key = (ctry, 'bootstrap_ci')
+                if ci_key in models:
+                    male_ci = models[ci_key].get('ame_male_ci', (np.nan, np.nan))
+                    fem_ci = models[ci_key].get('ame_female_ci', (np.nan, np.nan))
+                    if np.all(np.isfinite(male_ci)) or np.all(np.isfinite(fem_ci)):
+                        f.write(f"  95% CI by gender (bootstrap): male=[{male_ci[0]:.6f}, {male_ci[1]:.6f}], female=[{fem_ci[0]:.6f}, {fem_ci[1]:.6f}]\n")
             else:
                 f.write("  95% CI: analytic or N/A\n")
         # Threshold probability effects

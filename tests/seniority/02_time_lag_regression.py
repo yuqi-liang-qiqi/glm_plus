@@ -1,5 +1,5 @@
 # 时间滞后序数回归模型：t年的rarity_score预测t+1年的seniority
-# 因变量: t+1年的seniority (序数变量：Junior < Assistant < Regular < Senior < Leader < Chief or founder)
+# 因变量: t+1年的seniority (序数变量：Assistant < Junior < Regular < Senior < Leader < Chief or founder)
 # 解释变量: t年的rarity_score
 # 控制变量: t年的其他变量
 # 注意：由于需要下一年的seniority，最后一年的观测值会丢失
@@ -60,7 +60,7 @@ print("创建时间滞后数据集...")
 print(f"原始数据: {len(final_df)} 行")
 
 # 将 seniority 编码为序数
-seniority_order = ['Junior', 'Assistant', 'Regular', 'Senior', 'Leader', 'Chief or founder']
+seniority_order = ['Assistant', 'Junior', 'Regular', 'Senior', 'Leader', 'Chief or founder']
 seniority_mapping = {level: i for i, level in enumerate(seniority_order)}
 
 print("序数变量 seniority 的编码映射:")
@@ -652,17 +652,17 @@ for ctry in countries:
                             dll = max(0.0, LL1 - LL0)
                             LR = max(0.0, LR)
                             print(f"  {ctry}: {v}: ΔLL={dll:.3f}, LR={LR:.2f}, p={p:.4f}")
-                            best = max(best or (None,-1e9,1.0,None), (v, LR, p, res1), key=lambda t: t[1])
+                            best = max(best or (None,-1e9,1.0,None,None), (v, LR, p, res1, LL1), key=lambda t: t[1])
                         else:
                             print(f"  {ctry}: {v}: 模型拟合失败")
                     
                     if best and best[0] is not None:
-                        v, LR, p, _ = best
+                        v, LR, p, res1_best, LL1_best = best
                         if p < alpha:
                             npl_now.append(v)
                             pl_now.remove(v) 
-                            LL0 = LL1   # 基线LL直接替换为选中模型的LL
-                            baseline_res = res1
+                            LL0 = LL1_best   # 基线LL设为最优候选的LL
+                            baseline_res = res1_best
                             cands.remove(v)
                             improvement_log.append((v, LR, p))
                             print(f"  {ctry}: -> 选择 {v} (p={p:.4f}, ΔLL={LR/2:.3f})")
@@ -820,11 +820,11 @@ for ctry in countries:
                 
                 # 门槛可读名称映射
                 cuts_readable = {
-                    "cut1": "Junior→Assistant",
-                    "cut2": "Assistant→Regular", 
+                    "cut1": "Assistant→Junior",
+                    "cut2": "Junior→Regular", 
                     "cut3": "Regular→Senior",
                     "cut4": "Senior→Leader",
-                    "cut5": "Leader→Chief/founder"
+                    "cut5": "Leader→Chief or founder"
                 }
                 
                 # 构造摘要文字
@@ -1318,11 +1318,11 @@ for ctry in countries:
                 
                 # 生成简化模型摘要
                 cuts_readable = {
-                    "cut1": "Junior→Assistant",
-                    "cut2": "Assistant→Regular", 
+                    "cut1": "Assistant→Junior",
+                    "cut2": "Junior→Regular", 
                     "cut3": "Regular→Senior",
                     "cut4": "Senior→Leader",
-                    "cut5": "Leader→Chief/founder"
+                    "cut5": "Leader→Chief or founder"
                 }
                 
                 threshold_lines_simple = []
@@ -1585,11 +1585,11 @@ for ctry in countries:
                     'variable': var,
                     'threshold': cut_name,
                     'threshold_readable': {
-                        "cut1": "Junior→Assistant",
-                        "cut2": "Assistant→Regular", 
+                        "cut1": "Assistant→Junior",
+                        "cut2": "Junior→Regular", 
                         "cut3": "Regular→Senior",
                         "cut4": "Senior→Leader",
-                        "cut5": "Leader→Chief/founder"
+                        "cut5": "Leader→Chief or founder"
                     }.get(cut_name, cut_name),
                     'coefficient': coef_val,
                     'std_error': se_by_threshold[i] if se_by_threshold is not None else np.nan,
@@ -1622,7 +1622,7 @@ ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 with open(report_path, "w", encoding="utf-8") as f:
     f.write(f"Time Lag Ordinal Regression Report\nGenerated: {ts}\n\n")
     f.write("RESEARCH QUESTION: Does t-year rarity_score predict t+1 year seniority?\n\n")
-    f.write("IMPORTANT: seniority is an ordinal variable (Junior < Assistant < Regular < Senior < Leader < Chief or founder)\n\n")
+    f.write("IMPORTANT: seniority is an ordinal variable (Assistant < Junior < Regular < Senior < Leader < Chief or founder)\n\n")
     f.write("Statistical Methods Used:\n")
     f.write("1. Primary: Generalized Ordered Model (gologit2) with time lag\n")
     f.write("2. Fallback: Simplified Generalized Ordered Model with essential controls only\n")
@@ -1662,7 +1662,7 @@ with open(report_path, "w", encoding="utf-8") as f:
     # Primary metrics section: AME(E[Y]) and dPr(Y≥j) with 95% CI when bootstrap is enabled
     f.write("PRIMARY METRICS (for publication): AME(E[Y]) and Threshold Probability Effects with 95% CIs\n")
     f.write("- AME(E[Y]) reported per +1 SD for rarity_score_z\n")
-    f.write("- dPr(Y≥j)/dx reported at each threshold (Junior→Assistant, ..., Leader→Chief/founder)\n")
+    f.write("- dPr(Y≥j)/dx reported at each threshold (Assistant→Junior, ..., Leader→Chief/founder)\n")
     f.write("- If analytic SEs are unavailable (SE=NaN), bootstrap percentile 95% CIs are used\n\n")
     for ctry in countries:
         f.write(f"Country: {ctry}\n")
@@ -1876,11 +1876,11 @@ with open(report_path, "w", encoding="utf-8") as f:
         if significant_effects:
             f.write("Key Insights (based on dPr(Y≥j)/dx):\n")
             cuts_readable = {
-                "cut1": "Junior→Assistant",
-                "cut2": "Assistant→Regular", 
+                "cut1": "Assistant→Junior",
+                "cut2": "Junior→Regular", 
                 "cut3": "Regular→Senior",
                 "cut4": "Senior→Leader",
-                "cut5": "Leader→Chief/founder"
+                "cut5": "Leader→Chief or founder"
             }
             
             for cut, dpr in significant_effects:

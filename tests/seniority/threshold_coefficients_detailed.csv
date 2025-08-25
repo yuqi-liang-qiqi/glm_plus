@@ -1,191 +1,191 @@
 country,model_type,variable,threshold,threshold_readable,coefficient,std_error,p_value,significant_05,significant_01
-us,Full_Model,rarity_score_z,cut1,Junior→Assistant,-0.08452476591321544,20764.162246582917,0.9999967520478348,False,False
-us,Full_Model,rarity_score_z,cut2,Assistant→Regular,-0.3283437917513862,45539.13325421858,0.9999942471359609,False,False
-us,Full_Model,rarity_score_z,cut3,Regular→Senior,-0.02900196428819176,7423.527662312432,0.9999968828540027,False,False
-us,Full_Model,rarity_score_z,cut4,Senior→Leader,0.11732258256032331,24235.461035205797,0.9999961374831234,False,False
-us,Full_Model,rarity_score_z,cut5,Leader→Chief/founder,0.1847983463998082,7904.970991277742,0.999981347465082,False,False
-us,Full_Model,whether_bachelor_university_prestigious,cut1,Junior→Assistant,0.8979545677061984,35257.11508468173,0.9999796788794524,False,False
-us,Full_Model,whether_bachelor_university_prestigious,cut2,Assistant→Regular,0.8979545677061984,35257.11508468173,0.9999796788794524,False,False
-us,Full_Model,whether_bachelor_university_prestigious,cut3,Regular→Senior,0.8979545677061984,35257.11508468173,0.9999796788794524,False,False
-us,Full_Model,whether_bachelor_university_prestigious,cut4,Senior→Leader,0.8979545677061984,35257.11508468173,0.9999796788794524,False,False
-us,Full_Model,whether_bachelor_university_prestigious,cut5,Leader→Chief/founder,0.8979545677061984,35257.11508468173,0.9999796788794524,False,False
-us,Full_Model,work_years,cut1,Junior→Assistant,-0.028887637553657586,13282.005249353677,0.9999982646445646,False,False
-us,Full_Model,work_years,cut2,Assistant→Regular,-0.028887637553657586,13282.005249353677,0.9999982646445646,False,False
-us,Full_Model,work_years,cut3,Regular→Senior,-0.028887637553657586,13282.005249353677,0.9999982646445646,False,False
-us,Full_Model,work_years,cut4,Senior→Leader,-0.028887637553657586,13282.005249353677,0.9999982646445646,False,False
-us,Full_Model,work_years,cut5,Leader→Chief/founder,-0.028887637553657586,13282.005249353677,0.9999982646445646,False,False
-us,Full_Model,gender_female,cut1,Junior→Assistant,0.4354716361110023,32960.40930046705,0.9999894583804485,False,False
-us,Full_Model,gender_female,cut2,Assistant→Regular,0.4354716361110023,32960.40930046705,0.9999894583804485,False,False
-us,Full_Model,gender_female,cut3,Regular→Senior,0.4354716361110023,32960.40930046705,0.9999894583804485,False,False
-us,Full_Model,gender_female,cut4,Senior→Leader,0.4354716361110023,32960.40930046705,0.9999894583804485,False,False
-us,Full_Model,gender_female,cut5,Leader→Chief/founder,0.4354716361110023,32960.40930046705,0.9999894583804485,False,False
-us,Full_Model,highest_educational_degree_Advanced Degree,cut1,Junior→Assistant,0.11510962518354254,72550.75487260614,0.9999987340697847,False,False
-us,Full_Model,highest_educational_degree_Advanced Degree,cut2,Assistant→Regular,0.11510962518354254,72550.75487260614,0.9999987340697847,False,False
-us,Full_Model,highest_educational_degree_Advanced Degree,cut3,Regular→Senior,0.11510962518354254,72550.75487260614,0.9999987340697847,False,False
-us,Full_Model,highest_educational_degree_Advanced Degree,cut4,Senior→Leader,0.11510962518354254,72550.75487260614,0.9999987340697847,False,False
-us,Full_Model,highest_educational_degree_Advanced Degree,cut5,Leader→Chief/founder,0.11510962518354254,72550.75487260614,0.9999987340697847,False,False
-us,Full_Model,internationalization_Multinational,cut1,Junior→Assistant,0.3118481520009298,106505.51194692515,0.9999976637939085,False,False
-us,Full_Model,internationalization_Multinational,cut2,Assistant→Regular,0.43858655614184033,87376.28973183615,0.9999959950068515,False,False
-us,Full_Model,internationalization_Multinational,cut3,Regular→Senior,0.17226081803653032,19324.143243919872,0.9999928874338486,False,False
-us,Full_Model,internationalization_Multinational,cut4,Senior→Leader,0.1811488517493554,3219.7346697176667,0.9999551093842294,False,False
-us,Full_Model,internationalization_Multinational,cut5,Leader→Chief/founder,-0.5520288908506075,34714.80389038745,0.9999873121757941,False,False
-us,Full_Model,internationalization_International,cut1,Junior→Assistant,0.009387302851085712,10248.273851996928,0.9999992691467734,False,False
-us,Full_Model,internationalization_International,cut2,Assistant→Regular,0.009387302851085712,10248.273851996928,0.9999992691467734,False,False
-us,Full_Model,internationalization_International,cut3,Regular→Senior,0.009387302851085712,10248.273851996928,0.9999992691467734,False,False
-us,Full_Model,internationalization_International,cut4,Senior→Leader,0.009387302851085712,10248.273851996928,0.9999992691467734,False,False
-us,Full_Model,internationalization_International,cut5,Leader→Chief/founder,0.009387302851085712,10248.273851996928,0.9999992691467734,False,False
-us,Full_Model,simplified_company_size_Large (500+ employees),cut1,Junior→Assistant,1.1136761337018612,31937.190820739994,0.9999721771085748,False,False
-us,Full_Model,simplified_company_size_Large (500+ employees),cut2,Assistant→Regular,1.1136761337018612,31937.190820739994,0.9999721771085748,False,False
-us,Full_Model,simplified_company_size_Large (500+ employees),cut3,Regular→Senior,1.1136761337018612,31937.190820739994,0.9999721771085748,False,False
-us,Full_Model,simplified_company_size_Large (500+ employees),cut4,Senior→Leader,1.1136761337018612,31937.190820739994,0.9999721771085748,False,False
-us,Full_Model,simplified_company_size_Large (500+ employees),cut5,Leader→Chief/founder,1.1136761337018612,31937.190820739994,0.9999721771085748,False,False
-us,Full_Model,simplified_company_size_Small (11-50 employees),cut1,Junior→Assistant,-0.1446228997259786,15302.295027940349,0.9999924591455975,False,False
-us,Full_Model,simplified_company_size_Small (11-50 employees),cut2,Assistant→Regular,-0.1446228997259786,15302.295027940349,0.9999924591455975,False,False
-us,Full_Model,simplified_company_size_Small (11-50 employees),cut3,Regular→Senior,-0.1446228997259786,15302.295027940349,0.9999924591455975,False,False
-us,Full_Model,simplified_company_size_Small (11-50 employees),cut4,Senior→Leader,-0.1446228997259786,15302.295027940349,0.9999924591455975,False,False
-us,Full_Model,simplified_company_size_Small (11-50 employees),cut5,Leader→Chief/founder,-0.1446228997259786,15302.295027940349,0.9999924591455975,False,False
-us,Full_Model,simplified_company_size_Medium (51-500 employees),cut1,Junior→Assistant,0.6130257057741172,34790.01665554707,0.9999859406866392,False,False
-us,Full_Model,simplified_company_size_Medium (51-500 employees),cut2,Assistant→Regular,0.6130257057741172,34790.01665554707,0.9999859406866392,False,False
-us,Full_Model,simplified_company_size_Medium (51-500 employees),cut3,Regular→Senior,0.6130257057741172,34790.01665554707,0.9999859406866392,False,False
-us,Full_Model,simplified_company_size_Medium (51-500 employees),cut4,Senior→Leader,0.6130257057741172,34790.01665554707,0.9999859406866392,False,False
-us,Full_Model,simplified_company_size_Medium (51-500 employees),cut5,Leader→Chief/founder,0.6130257057741172,34790.01665554707,0.9999859406866392,False,False
-us,Full_Model,rarity_score_z_x_gender_female,cut1,Junior→Assistant,0.04337994612203525,9467.669461151476,0.9999963441700832,False,False
-us,Full_Model,rarity_score_z_x_gender_female,cut2,Assistant→Regular,0.04337994612203525,9467.669461151476,0.9999963441700832,False,False
-us,Full_Model,rarity_score_z_x_gender_female,cut3,Regular→Senior,0.04337994612203525,9467.669461151476,0.9999963441700832,False,False
-us,Full_Model,rarity_score_z_x_gender_female,cut4,Senior→Leader,0.04337994612203525,9467.669461151476,0.9999963441700832,False,False
-us,Full_Model,rarity_score_z_x_gender_female,cut5,Leader→Chief/founder,0.04337994612203525,9467.669461151476,0.9999963441700832,False,False
-us,Full_Model,year_2,cut1,Junior→Assistant,0.19068504408337741,46077.80695758096,0.999996698092581,False,False
-us,Full_Model,year_2,cut2,Assistant→Regular,0.19068504408337741,46077.80695758096,0.999996698092581,False,False
-us,Full_Model,year_2,cut3,Regular→Senior,0.19068504408337741,46077.80695758096,0.999996698092581,False,False
-us,Full_Model,year_2,cut4,Senior→Leader,0.19068504408337741,46077.80695758096,0.999996698092581,False,False
-us,Full_Model,year_2,cut5,Leader→Chief/founder,0.19068504408337741,46077.80695758096,0.999996698092581,False,False
-us,Full_Model,year_3,cut1,Junior→Assistant,0.7704028805624588,35574.71631624663,0.9999827210831849,False,False
-us,Full_Model,year_3,cut2,Assistant→Regular,0.7704028805624588,35574.71631624663,0.9999827210831849,False,False
-us,Full_Model,year_3,cut3,Regular→Senior,0.7704028805624588,35574.71631624663,0.9999827210831849,False,False
-us,Full_Model,year_3,cut4,Senior→Leader,0.7704028805624588,35574.71631624663,0.9999827210831849,False,False
-us,Full_Model,year_3,cut5,Leader→Chief/founder,0.7704028805624588,35574.71631624663,0.9999827210831849,False,False
-us,Full_Model,year_4,cut1,Junior→Assistant,0.023779713687608294,7722.921896512694,0.9999975432269463,False,False
-us,Full_Model,year_4,cut2,Assistant→Regular,0.023779713687608294,7722.921896512694,0.9999975432269463,False,False
-us,Full_Model,year_4,cut3,Regular→Senior,0.023779713687608294,7722.921896512694,0.9999975432269463,False,False
-us,Full_Model,year_4,cut4,Senior→Leader,0.023779713687608294,7722.921896512694,0.9999975432269463,False,False
-us,Full_Model,year_4,cut5,Leader→Chief/founder,0.023779713687608294,7722.921896512694,0.9999975432269463,False,False
-us,Full_Model,year_5,cut1,Junior→Assistant,0.06411781834920725,80318.0966192339,0.9999993630499291,False,False
-us,Full_Model,year_5,cut2,Assistant→Regular,0.06411781834920725,80318.0966192339,0.9999993630499291,False,False
-us,Full_Model,year_5,cut3,Regular→Senior,0.06411781834920725,80318.0966192339,0.9999993630499291,False,False
-us,Full_Model,year_5,cut4,Senior→Leader,0.06411781834920725,80318.0966192339,0.9999993630499291,False,False
-us,Full_Model,year_5,cut5,Leader→Chief/founder,0.06411781834920725,80318.0966192339,0.9999993630499291,False,False
-us,Full_Model,year_6,cut1,Junior→Assistant,0.005896653121028565,17004.711866837413,0.9999997233208935,False,False
-us,Full_Model,year_6,cut2,Assistant→Regular,0.005896653121028565,17004.711866837413,0.9999997233208935,False,False
-us,Full_Model,year_6,cut3,Regular→Senior,0.005896653121028565,17004.711866837413,0.9999997233208935,False,False
-us,Full_Model,year_6,cut4,Senior→Leader,0.005896653121028565,17004.711866837413,0.9999997233208935,False,False
-us,Full_Model,year_6,cut5,Leader→Chief/founder,0.005896653121028565,17004.711866837413,0.9999997233208935,False,False
-us,Full_Model,year_7,cut1,Junior→Assistant,0.2426078284837439,30317.789663881358,0.9999936151994318,False,False
-us,Full_Model,year_7,cut2,Assistant→Regular,0.2426078284837439,30317.789663881358,0.9999936151994318,False,False
-us,Full_Model,year_7,cut3,Regular→Senior,0.2426078284837439,30317.789663881358,0.9999936151994318,False,False
-us,Full_Model,year_7,cut4,Senior→Leader,0.2426078284837439,30317.789663881358,0.9999936151994318,False,False
-us,Full_Model,year_7,cut5,Leader→Chief/founder,0.2426078284837439,30317.789663881358,0.9999936151994318,False,False
-us,Full_Model,year_8,cut1,Junior→Assistant,0.9931144715177456,34112.0300960885,0.9999767709309124,False,False
-us,Full_Model,year_8,cut2,Assistant→Regular,0.9931144715177456,34112.0300960885,0.9999767709309124,False,False
-us,Full_Model,year_8,cut3,Regular→Senior,0.9931144715177456,34112.0300960885,0.9999767709309124,False,False
-us,Full_Model,year_8,cut4,Senior→Leader,0.9931144715177456,34112.0300960885,0.9999767709309124,False,False
-us,Full_Model,year_8,cut5,Leader→Chief/founder,0.9931144715177456,34112.0300960885,0.9999767709309124,False,False
-us,Full_Model,year_9,cut1,Junior→Assistant,1.072871752928184,32536.45557161426,0.9999736901948233,False,False
-us,Full_Model,year_9,cut2,Assistant→Regular,1.072871752928184,32536.45557161426,0.9999736901948233,False,False
-us,Full_Model,year_9,cut3,Regular→Senior,1.072871752928184,32536.45557161426,0.9999736901948233,False,False
-us,Full_Model,year_9,cut4,Senior→Leader,1.072871752928184,32536.45557161426,0.9999736901948233,False,False
-us,Full_Model,year_9,cut5,Leader→Chief/founder,1.072871752928184,32536.45557161426,0.9999736901948233,False,False
-india,Full_Model,rarity_score_z,cut1,Junior→Assistant,-0.24630214086325575,5052.630617085344,0.9999611052755875,False,False
-india,Full_Model,rarity_score_z,cut2,Assistant→Regular,-0.14631147882386342,3889.3008388078806,0.9999699844072669,False,False
-india,Full_Model,rarity_score_z,cut3,Regular→Senior,0.07300039229566128,8093.575280791422,0.9999928034417518,False,False
-india,Full_Model,rarity_score_z,cut4,Senior→Leader,0.3026227742619195,8158.369310008919,0.9999704036394896,False,False
-india,Full_Model,rarity_score_z,cut5,Leader→Chief/founder,-0.08988486630997089,150.16878058054863,0.99952241909058,False,False
-india,Full_Model,whether_bachelor_university_prestigious,cut1,Junior→Assistant,0.9097879472647059,3653.9689234114417,0.9998013377331767,False,False
-india,Full_Model,whether_bachelor_university_prestigious,cut2,Assistant→Regular,0.9097879472647059,3653.9689234114417,0.9998013377331767,False,False
-india,Full_Model,whether_bachelor_university_prestigious,cut3,Regular→Senior,0.9097879472647059,3653.9689234114417,0.9998013377331767,False,False
-india,Full_Model,whether_bachelor_university_prestigious,cut4,Senior→Leader,0.9097879472647059,3653.9689234114417,0.9998013377331767,False,False
-india,Full_Model,whether_bachelor_university_prestigious,cut5,Leader→Chief/founder,0.9097879472647059,3653.9689234114417,0.9998013377331767,False,False
-india,Full_Model,work_years,cut1,Junior→Assistant,-0.07617715287763223,6853.312981748948,0.9999911312128416,False,False
-india,Full_Model,work_years,cut2,Assistant→Regular,-0.07617715287763223,6853.312981748948,0.9999911312128416,False,False
-india,Full_Model,work_years,cut3,Regular→Senior,-0.07617715287763223,6853.312981748948,0.9999911312128416,False,False
-india,Full_Model,work_years,cut4,Senior→Leader,-0.07617715287763223,6853.312981748948,0.9999911312128416,False,False
-india,Full_Model,work_years,cut5,Leader→Chief/founder,-0.07617715287763223,6853.312981748948,0.9999911312128416,False,False
-india,Full_Model,gender_female,cut1,Junior→Assistant,0.4420441511310877,4479.862284562978,0.9999212698559901,False,False
-india,Full_Model,gender_female,cut2,Assistant→Regular,0.4420441511310877,4479.862284562978,0.9999212698559901,False,False
-india,Full_Model,gender_female,cut3,Regular→Senior,0.4420441511310877,4479.862284562978,0.9999212698559901,False,False
-india,Full_Model,gender_female,cut4,Senior→Leader,0.4420441511310877,4479.862284562978,0.9999212698559901,False,False
-india,Full_Model,gender_female,cut5,Leader→Chief/founder,0.4420441511310877,4479.862284562978,0.9999212698559901,False,False
-india,Full_Model,highest_educational_degree_Advanced Degree,cut1,Junior→Assistant,0.0037157886978697267,7086.577626109539,0.9999995816357923,False,False
-india,Full_Model,highest_educational_degree_Advanced Degree,cut2,Assistant→Regular,0.0037157886978697267,7086.577626109539,0.9999995816357923,False,False
-india,Full_Model,highest_educational_degree_Advanced Degree,cut3,Regular→Senior,0.0037157886978697267,7086.577626109539,0.9999995816357923,False,False
-india,Full_Model,highest_educational_degree_Advanced Degree,cut4,Senior→Leader,0.0037157886978697267,7086.577626109539,0.9999995816357923,False,False
-india,Full_Model,highest_educational_degree_Advanced Degree,cut5,Leader→Chief/founder,0.0037157886978697267,7086.577626109539,0.9999995816357923,False,False
-india,Full_Model,internationalization_International,cut1,Junior→Assistant,0.15086071424809577,11101.230435838954,0.9999891571087167,False,False
-india,Full_Model,internationalization_International,cut2,Assistant→Regular,0.14945087970773294,13017.644541574262,0.9999908397752655,False,False
-india,Full_Model,internationalization_International,cut3,Regular→Senior,-0.15139102164568505,2931.054102664119,0.9999587886969907,False,False
-india,Full_Model,internationalization_International,cut4,Senior→Leader,-0.17624307482458013,3573.853623298256,0.9999606526614919,False,False
-india,Full_Model,internationalization_International,cut5,Leader→Chief/founder,-0.017897830354579484,307.42719806786295,0.9999535486691045,False,False
-india,Full_Model,internationalization_Multinational,cut1,Junior→Assistant,0.15002427821465522,582.3485610060727,0.9997944494723192,False,False
-india,Full_Model,internationalization_Multinational,cut2,Assistant→Regular,0.15002427821465522,582.3485610060727,0.9997944494723192,False,False
-india,Full_Model,internationalization_Multinational,cut3,Regular→Senior,0.15002427821465522,582.3485610060727,0.9997944494723192,False,False
-india,Full_Model,internationalization_Multinational,cut4,Senior→Leader,0.15002427821465522,582.3485610060727,0.9997944494723192,False,False
-india,Full_Model,internationalization_Multinational,cut5,Leader→Chief/founder,0.15002427821465522,582.3485610060727,0.9997944494723192,False,False
-india,Full_Model,simplified_company_size_Large (500+ employees),cut1,Junior→Assistant,1.051443425507819,3555.0161147068516,0.9997640150040197,False,False
-india,Full_Model,simplified_company_size_Large (500+ employees),cut2,Assistant→Regular,1.051443425507819,3555.0161147068516,0.9997640150040197,False,False
-india,Full_Model,simplified_company_size_Large (500+ employees),cut3,Regular→Senior,1.051443425507819,3555.0161147068516,0.9997640150040197,False,False
-india,Full_Model,simplified_company_size_Large (500+ employees),cut4,Senior→Leader,1.051443425507819,3555.0161147068516,0.9997640150040197,False,False
-india,Full_Model,simplified_company_size_Large (500+ employees),cut5,Leader→Chief/founder,1.051443425507819,3555.0161147068516,0.9997640150040197,False,False
-india,Full_Model,simplified_company_size_Small (11-50 employees),cut1,Junior→Assistant,-0.01366240777832567,535.4113694273403,0.9999796399089542,False,False
-india,Full_Model,simplified_company_size_Small (11-50 employees),cut2,Assistant→Regular,-0.01366240777832567,535.4113694273403,0.9999796399089542,False,False
-india,Full_Model,simplified_company_size_Small (11-50 employees),cut3,Regular→Senior,-0.01366240777832567,535.4113694273403,0.9999796399089542,False,False
-india,Full_Model,simplified_company_size_Small (11-50 employees),cut4,Senior→Leader,-0.01366240777832567,535.4113694273403,0.9999796399089542,False,False
-india,Full_Model,simplified_company_size_Small (11-50 employees),cut5,Leader→Chief/founder,-0.01366240777832567,535.4113694273403,0.9999796399089542,False,False
-india,Full_Model,simplified_company_size_Medium (51-500 employees),cut1,Junior→Assistant,0.6579616449365783,1468.782322151714,0.9996425764304078,False,False
-india,Full_Model,simplified_company_size_Medium (51-500 employees),cut2,Assistant→Regular,0.6579616449365783,1468.782322151714,0.9996425764304078,False,False
-india,Full_Model,simplified_company_size_Medium (51-500 employees),cut3,Regular→Senior,0.6579616449365783,1468.782322151714,0.9996425764304078,False,False
-india,Full_Model,simplified_company_size_Medium (51-500 employees),cut4,Senior→Leader,0.6579616449365783,1468.782322151714,0.9996425764304078,False,False
-india,Full_Model,simplified_company_size_Medium (51-500 employees),cut5,Leader→Chief/founder,0.6579616449365783,1468.782322151714,0.9996425764304078,False,False
-india,Full_Model,rarity_score_z_x_gender_female,cut1,Junior→Assistant,-0.07077616545080474,1149.6996462606419,0.9999508817717444,False,False
-india,Full_Model,rarity_score_z_x_gender_female,cut2,Assistant→Regular,-0.07077616545080474,1149.6996462606419,0.9999508817717444,False,False
-india,Full_Model,rarity_score_z_x_gender_female,cut3,Regular→Senior,-0.07077616545080474,1149.6996462606419,0.9999508817717444,False,False
-india,Full_Model,rarity_score_z_x_gender_female,cut4,Senior→Leader,-0.07077616545080474,1149.6996462606419,0.9999508817717444,False,False
-india,Full_Model,rarity_score_z_x_gender_female,cut5,Leader→Chief/founder,-0.07077616545080474,1149.6996462606419,0.9999508817717444,False,False
-india,Full_Model,year_2,cut1,Junior→Assistant,0.1965019983669879,1814.7057743099217,0.999913602572617,False,False
-india,Full_Model,year_2,cut2,Assistant→Regular,0.1965019983669879,1814.7057743099217,0.999913602572617,False,False
-india,Full_Model,year_2,cut3,Regular→Senior,0.1965019983669879,1814.7057743099217,0.999913602572617,False,False
-india,Full_Model,year_2,cut4,Senior→Leader,0.1965019983669879,1814.7057743099217,0.999913602572617,False,False
-india,Full_Model,year_2,cut5,Leader→Chief/founder,0.1965019983669879,1814.7057743099217,0.999913602572617,False,False
-india,Full_Model,year_3,cut1,Junior→Assistant,0.8135644162102793,1954.5434820354853,0.9996678864020501,False,False
-india,Full_Model,year_3,cut2,Assistant→Regular,0.8135644162102793,1954.5434820354853,0.9996678864020501,False,False
-india,Full_Model,year_3,cut3,Regular→Senior,0.8135644162102793,1954.5434820354853,0.9996678864020501,False,False
-india,Full_Model,year_3,cut4,Senior→Leader,0.8135644162102793,1954.5434820354853,0.9996678864020501,False,False
-india,Full_Model,year_3,cut5,Leader→Chief/founder,0.8135644162102793,1954.5434820354853,0.9996678864020501,False,False
-india,Full_Model,year_4,cut1,Junior→Assistant,0.0687307589682866,3186.5201616209783,0.999982790251231,False,False
-india,Full_Model,year_4,cut2,Assistant→Regular,0.0687307589682866,3186.5201616209783,0.999982790251231,False,False
-india,Full_Model,year_4,cut3,Regular→Senior,0.0687307589682866,3186.5201616209783,0.999982790251231,False,False
-india,Full_Model,year_4,cut4,Senior→Leader,0.0687307589682866,3186.5201616209783,0.999982790251231,False,False
-india,Full_Model,year_4,cut5,Leader→Chief/founder,0.0687307589682866,3186.5201616209783,0.999982790251231,False,False
-india,Full_Model,year_5,cut1,Junior→Assistant,0.2437407314679027,1593.7221631279501,0.9998779731058409,False,False
-india,Full_Model,year_5,cut2,Assistant→Regular,0.2437407314679027,1593.7221631279501,0.9998779731058409,False,False
-india,Full_Model,year_5,cut3,Regular→Senior,0.2437407314679027,1593.7221631279501,0.9998779731058409,False,False
-india,Full_Model,year_5,cut4,Senior→Leader,0.2437407314679027,1593.7221631279501,0.9998779731058409,False,False
-india,Full_Model,year_5,cut5,Leader→Chief/founder,0.2437407314679027,1593.7221631279501,0.9998779731058409,False,False
-india,Full_Model,year_6,cut1,Junior→Assistant,0.2098342970713025,17335.86301731139,0.99999034235874,False,False
-india,Full_Model,year_6,cut2,Assistant→Regular,0.2098342970713025,17335.86301731139,0.99999034235874,False,False
-india,Full_Model,year_6,cut3,Regular→Senior,0.2098342970713025,17335.86301731139,0.99999034235874,False,False
-india,Full_Model,year_6,cut4,Senior→Leader,0.2098342970713025,17335.86301731139,0.99999034235874,False,False
-india,Full_Model,year_6,cut5,Leader→Chief/founder,0.2098342970713025,17335.86301731139,0.99999034235874,False,False
-india,Full_Model,year_7,cut1,Junior→Assistant,0.1648838582161828,5067.882055949174,0.9999740407761426,False,False
-india,Full_Model,year_7,cut2,Assistant→Regular,0.1648838582161828,5067.882055949174,0.9999740407761426,False,False
-india,Full_Model,year_7,cut3,Regular→Senior,0.1648838582161828,5067.882055949174,0.9999740407761426,False,False
-india,Full_Model,year_7,cut4,Senior→Leader,0.1648838582161828,5067.882055949174,0.9999740407761426,False,False
-india,Full_Model,year_7,cut5,Leader→Chief/founder,0.1648838582161828,5067.882055949174,0.9999740407761426,False,False
-india,Full_Model,year_8,cut1,Junior→Assistant,0.9778094545209214,4359.910333230997,0.9998210561683614,False,False
-india,Full_Model,year_8,cut2,Assistant→Regular,0.9778094545209214,4359.910333230997,0.9998210561683614,False,False
-india,Full_Model,year_8,cut3,Regular→Senior,0.9778094545209214,4359.910333230997,0.9998210561683614,False,False
-india,Full_Model,year_8,cut4,Senior→Leader,0.9778094545209214,4359.910333230997,0.9998210561683614,False,False
-india,Full_Model,year_8,cut5,Leader→Chief/founder,0.9778094545209214,4359.910333230997,0.9998210561683614,False,False
-india,Full_Model,year_9,cut1,Junior→Assistant,1.0295414157824845,4599.862918640855,0.9998214174622091,False,False
-india,Full_Model,year_9,cut2,Assistant→Regular,1.0295414157824845,4599.862918640855,0.9998214174622091,False,False
-india,Full_Model,year_9,cut3,Regular→Senior,1.0295414157824845,4599.862918640855,0.9998214174622091,False,False
-india,Full_Model,year_9,cut4,Senior→Leader,1.0295414157824845,4599.862918640855,0.9998214174622091,False,False
-india,Full_Model,year_9,cut5,Leader→Chief/founder,1.0295414157824845,4599.862918640855,0.9998214174622091,False,False
+us,Full_Model,rarity_score_z,cut1,Assistant→Junior,-0.4001815719887316,5633.950060956219,0.9999433259624093,False,False
+us,Full_Model,rarity_score_z,cut2,Junior→Regular,-0.31633802733788247,18397.922443902717,0.9999862809929347,False,False
+us,Full_Model,rarity_score_z,cut3,Regular→Senior,-0.03458966365033704,11895.097835992061,0.9999976798376129,False,False
+us,Full_Model,rarity_score_z,cut4,Senior→Leader,0.10558727513639822,28346.511206927633,0.9999970279779393,False,False
+us,Full_Model,rarity_score_z,cut5,Leader→Chief or founder,0.16719347565245124,2818.61401257926,0.9999526713866402,False,False
+us,Full_Model,whether_bachelor_university_prestigious,cut1,Assistant→Junior,0.41462934039559124,15732.951162853145,0.9999789723907679,False,False
+us,Full_Model,whether_bachelor_university_prestigious,cut2,Junior→Regular,0.41462934039559124,15732.951162853145,0.9999789723907679,False,False
+us,Full_Model,whether_bachelor_university_prestigious,cut3,Regular→Senior,0.41462934039559124,15732.951162853145,0.9999789723907679,False,False
+us,Full_Model,whether_bachelor_university_prestigious,cut4,Senior→Leader,0.41462934039559124,15732.951162853145,0.9999789723907679,False,False
+us,Full_Model,whether_bachelor_university_prestigious,cut5,Leader→Chief or founder,0.41462934039559124,15732.951162853145,0.9999789723907679,False,False
+us,Full_Model,work_years,cut1,Assistant→Junior,0.16117935731999722,15086.613499045588,0.9999914757198007,False,False
+us,Full_Model,work_years,cut2,Junior→Regular,0.16117935731999722,15086.613499045588,0.9999914757198007,False,False
+us,Full_Model,work_years,cut3,Regular→Senior,0.16117935731999722,15086.613499045588,0.9999914757198007,False,False
+us,Full_Model,work_years,cut4,Senior→Leader,0.16117935731999722,15086.613499045588,0.9999914757198007,False,False
+us,Full_Model,work_years,cut5,Leader→Chief or founder,0.16117935731999722,15086.613499045588,0.9999914757198007,False,False
+us,Full_Model,gender_female,cut1,Assistant→Junior,0.02365711350263167,647.5990152882854,0.999970852880923,False,False
+us,Full_Model,gender_female,cut2,Junior→Regular,0.02365711350263167,647.5990152882854,0.999970852880923,False,False
+us,Full_Model,gender_female,cut3,Regular→Senior,0.02365711350263167,647.5990152882854,0.999970852880923,False,False
+us,Full_Model,gender_female,cut4,Senior→Leader,0.02365711350263167,647.5990152882854,0.999970852880923,False,False
+us,Full_Model,gender_female,cut5,Leader→Chief or founder,0.02365711350263167,647.5990152882854,0.999970852880923,False,False
+us,Full_Model,highest_educational_degree_Advanced Degree,cut1,Assistant→Junior,0.22614690813052435,19704.320535713374,0.9999908426618345,False,False
+us,Full_Model,highest_educational_degree_Advanced Degree,cut2,Junior→Regular,0.22614690813052435,19704.320535713374,0.9999908426618345,False,False
+us,Full_Model,highest_educational_degree_Advanced Degree,cut3,Regular→Senior,0.22614690813052435,19704.320535713374,0.9999908426618345,False,False
+us,Full_Model,highest_educational_degree_Advanced Degree,cut4,Senior→Leader,0.22614690813052435,19704.320535713374,0.9999908426618345,False,False
+us,Full_Model,highest_educational_degree_Advanced Degree,cut5,Leader→Chief or founder,0.22614690813052435,19704.320535713374,0.9999908426618345,False,False
+us,Full_Model,internationalization_Multinational,cut1,Assistant→Junior,0.8154418445701939,18365.543639863794,0.9999645734169071,False,False
+us,Full_Model,internationalization_Multinational,cut2,Junior→Regular,0.45968635081214393,18001.93793924342,0.999979625713447,False,False
+us,Full_Model,internationalization_Multinational,cut3,Regular→Senior,0.14882975388919567,14859.755674736987,0.9999920086867231,False,False
+us,Full_Model,internationalization_Multinational,cut4,Senior→Leader,0.14132709463285698,7657.653346213476,0.999985274508818,False,False
+us,Full_Model,internationalization_Multinational,cut5,Leader→Chief or founder,-0.5325032659757128,7768.2096686542145,0.9999453057844356,False,False
+us,Full_Model,internationalization_International,cut1,Assistant→Junior,-0.14540351264299398,3800.119808132405,0.999969470642071,False,False
+us,Full_Model,internationalization_International,cut2,Junior→Regular,-0.14540351264299398,3800.119808132405,0.999969470642071,False,False
+us,Full_Model,internationalization_International,cut3,Regular→Senior,-0.14540351264299398,3800.119808132405,0.999969470642071,False,False
+us,Full_Model,internationalization_International,cut4,Senior→Leader,-0.14540351264299398,3800.119808132405,0.999969470642071,False,False
+us,Full_Model,internationalization_International,cut5,Leader→Chief or founder,-0.14540351264299398,3800.119808132405,0.999969470642071,False,False
+us,Full_Model,simplified_company_size_Large (500+ employees),cut1,Assistant→Junior,1.08295541651092,692.2015960647865,0.9987517031753648,False,False
+us,Full_Model,simplified_company_size_Large (500+ employees),cut2,Junior→Regular,1.08295541651092,692.2015960647865,0.9987517031753648,False,False
+us,Full_Model,simplified_company_size_Large (500+ employees),cut3,Regular→Senior,1.08295541651092,692.2015960647865,0.9987517031753648,False,False
+us,Full_Model,simplified_company_size_Large (500+ employees),cut4,Senior→Leader,1.08295541651092,692.2015960647865,0.9987517031753648,False,False
+us,Full_Model,simplified_company_size_Large (500+ employees),cut5,Leader→Chief or founder,1.08295541651092,692.2015960647865,0.9987517031753648,False,False
+us,Full_Model,simplified_company_size_Small (11-50 employees),cut1,Assistant→Junior,0.015508258885900983,9729.550117187446,0.9999987282248222,False,False
+us,Full_Model,simplified_company_size_Small (11-50 employees),cut2,Junior→Regular,0.015508258885900983,9729.550117187446,0.9999987282248222,False,False
+us,Full_Model,simplified_company_size_Small (11-50 employees),cut3,Regular→Senior,0.015508258885900983,9729.550117187446,0.9999987282248222,False,False
+us,Full_Model,simplified_company_size_Small (11-50 employees),cut4,Senior→Leader,0.015508258885900983,9729.550117187446,0.9999987282248222,False,False
+us,Full_Model,simplified_company_size_Small (11-50 employees),cut5,Leader→Chief or founder,0.015508258885900983,9729.550117187446,0.9999987282248222,False,False
+us,Full_Model,simplified_company_size_Medium (51-500 employees),cut1,Assistant→Junior,-0.01585823527149027,12731.912156680064,0.9999990061947546,False,False
+us,Full_Model,simplified_company_size_Medium (51-500 employees),cut2,Junior→Regular,-0.01585823527149027,12731.912156680064,0.9999990061947546,False,False
+us,Full_Model,simplified_company_size_Medium (51-500 employees),cut3,Regular→Senior,-0.01585823527149027,12731.912156680064,0.9999990061947546,False,False
+us,Full_Model,simplified_company_size_Medium (51-500 employees),cut4,Senior→Leader,-0.01585823527149027,12731.912156680064,0.9999990061947546,False,False
+us,Full_Model,simplified_company_size_Medium (51-500 employees),cut5,Leader→Chief or founder,-0.01585823527149027,12731.912156680064,0.9999990061947546,False,False
+us,Full_Model,rarity_score_z_x_gender_female,cut1,Assistant→Junior,0.12843023956912752,2595.902610465894,0.9999605252890316,False,False
+us,Full_Model,rarity_score_z_x_gender_female,cut2,Junior→Regular,0.12843023956912752,2595.902610465894,0.9999605252890316,False,False
+us,Full_Model,rarity_score_z_x_gender_female,cut3,Regular→Senior,0.12843023956912752,2595.902610465894,0.9999605252890316,False,False
+us,Full_Model,rarity_score_z_x_gender_female,cut4,Senior→Leader,0.12843023956912752,2595.902610465894,0.9999605252890316,False,False
+us,Full_Model,rarity_score_z_x_gender_female,cut5,Leader→Chief or founder,0.12843023956912752,2595.902610465894,0.9999605252890316,False,False
+us,Full_Model,year_2,cut1,Assistant→Junior,0.5913664966092487,13016.681808442256,0.9999637509617119,False,False
+us,Full_Model,year_2,cut2,Junior→Regular,0.5913664966092487,13016.681808442256,0.9999637509617119,False,False
+us,Full_Model,year_2,cut3,Regular→Senior,0.5913664966092487,13016.681808442256,0.9999637509617119,False,False
+us,Full_Model,year_2,cut4,Senior→Leader,0.5913664966092487,13016.681808442256,0.9999637509617119,False,False
+us,Full_Model,year_2,cut5,Leader→Chief or founder,0.5913664966092487,13016.681808442256,0.9999637509617119,False,False
+us,Full_Model,year_3,cut1,Assistant→Junior,0.965966993631889,4746.41198639444,0.9998376183636497,False,False
+us,Full_Model,year_3,cut2,Junior→Regular,0.965966993631889,4746.41198639444,0.9998376183636497,False,False
+us,Full_Model,year_3,cut3,Regular→Senior,0.965966993631889,4746.41198639444,0.9998376183636497,False,False
+us,Full_Model,year_3,cut4,Senior→Leader,0.965966993631889,4746.41198639444,0.9998376183636497,False,False
+us,Full_Model,year_3,cut5,Leader→Chief or founder,0.965966993631889,4746.41198639444,0.9998376183636497,False,False
+us,Full_Model,year_4,cut1,Assistant→Junior,0.7475821939374587,10345.27500867597,0.999942342345713,False,False
+us,Full_Model,year_4,cut2,Junior→Regular,0.7475821939374587,10345.27500867597,0.999942342345713,False,False
+us,Full_Model,year_4,cut3,Regular→Senior,0.7475821939374587,10345.27500867597,0.999942342345713,False,False
+us,Full_Model,year_4,cut4,Senior→Leader,0.7475821939374587,10345.27500867597,0.999942342345713,False,False
+us,Full_Model,year_4,cut5,Leader→Chief or founder,0.7475821939374587,10345.27500867597,0.999942342345713,False,False
+us,Full_Model,year_5,cut1,Assistant→Junior,0.19397473406581214,31885.410233345105,0.9999951460732552,False,False
+us,Full_Model,year_5,cut2,Junior→Regular,0.19397473406581214,31885.410233345105,0.9999951460732552,False,False
+us,Full_Model,year_5,cut3,Regular→Senior,0.19397473406581214,31885.410233345105,0.9999951460732552,False,False
+us,Full_Model,year_5,cut4,Senior→Leader,0.19397473406581214,31885.410233345105,0.9999951460732552,False,False
+us,Full_Model,year_5,cut5,Leader→Chief or founder,0.19397473406581214,31885.410233345105,0.9999951460732552,False,False
+us,Full_Model,year_6,cut1,Assistant→Junior,-0.0008212434099118543,5036.256999261392,0.9999998698919779,False,False
+us,Full_Model,year_6,cut2,Junior→Regular,-0.0008212434099118543,5036.256999261392,0.9999998698919779,False,False
+us,Full_Model,year_6,cut3,Regular→Senior,-0.0008212434099118543,5036.256999261392,0.9999998698919779,False,False
+us,Full_Model,year_6,cut4,Senior→Leader,-0.0008212434099118543,5036.256999261392,0.9999998698919779,False,False
+us,Full_Model,year_6,cut5,Leader→Chief or founder,-0.0008212434099118543,5036.256999261392,0.9999998698919779,False,False
+us,Full_Model,year_7,cut1,Assistant→Junior,0.8732111403181867,7457.92863837736,0.9999065797328759,False,False
+us,Full_Model,year_7,cut2,Junior→Regular,0.8732111403181867,7457.92863837736,0.9999065797328759,False,False
+us,Full_Model,year_7,cut3,Regular→Senior,0.8732111403181867,7457.92863837736,0.9999065797328759,False,False
+us,Full_Model,year_7,cut4,Senior→Leader,0.8732111403181867,7457.92863837736,0.9999065797328759,False,False
+us,Full_Model,year_7,cut5,Leader→Chief or founder,0.8732111403181867,7457.92863837736,0.9999065797328759,False,False
+us,Full_Model,year_8,cut1,Assistant→Junior,0.033174676697612,6014.719906023914,0.9999955992028291,False,False
+us,Full_Model,year_8,cut2,Junior→Regular,0.033174676697612,6014.719906023914,0.9999955992028291,False,False
+us,Full_Model,year_8,cut3,Regular→Senior,0.033174676697612,6014.719906023914,0.9999955992028291,False,False
+us,Full_Model,year_8,cut4,Senior→Leader,0.033174676697612,6014.719906023914,0.9999955992028291,False,False
+us,Full_Model,year_8,cut5,Leader→Chief or founder,0.033174676697612,6014.719906023914,0.9999955992028291,False,False
+us,Full_Model,year_9,cut1,Assistant→Junior,1.0431768669957902,2140.9518429143322,0.9996112314781003,False,False
+us,Full_Model,year_9,cut2,Junior→Regular,1.0431768669957902,2140.9518429143322,0.9996112314781003,False,False
+us,Full_Model,year_9,cut3,Regular→Senior,1.0431768669957902,2140.9518429143322,0.9996112314781003,False,False
+us,Full_Model,year_9,cut4,Senior→Leader,1.0431768669957902,2140.9518429143322,0.9996112314781003,False,False
+us,Full_Model,year_9,cut5,Leader→Chief or founder,1.0431768669957902,2140.9518429143322,0.9996112314781003,False,False
+india,Full_Model,rarity_score_z,cut1,Assistant→Junior,0.28700331490822356,2892.8377214654565,0.999920840525623,False,False
+india,Full_Model,rarity_score_z,cut2,Junior→Regular,-0.1745727840481808,1223.184390782601,0.9998861259760137,False,False
+india,Full_Model,rarity_score_z,cut3,Regular→Senior,0.0574183575126745,384.7693258768278,0.9998809332820604,False,False
+india,Full_Model,rarity_score_z,cut4,Senior→Leader,0.2962438447587193,2468.0644149065765,0.9999042292462179,False,False
+india,Full_Model,rarity_score_z,cut5,Leader→Chief or founder,-0.1553542534895186,158.26984263867712,0.9992168139024922,False,False
+india,Full_Model,whether_bachelor_university_prestigious,cut1,Assistant→Junior,0.6808258050046174,5080.22164955909,0.9998930715165095,False,False
+india,Full_Model,whether_bachelor_university_prestigious,cut2,Junior→Regular,0.6808258050046174,5080.22164955909,0.9998930715165095,False,False
+india,Full_Model,whether_bachelor_university_prestigious,cut3,Regular→Senior,0.6808258050046174,5080.22164955909,0.9998930715165095,False,False
+india,Full_Model,whether_bachelor_university_prestigious,cut4,Senior→Leader,0.6808258050046174,5080.22164955909,0.9998930715165095,False,False
+india,Full_Model,whether_bachelor_university_prestigious,cut5,Leader→Chief or founder,0.6808258050046174,5080.22164955909,0.9998930715165095,False,False
+india,Full_Model,work_years,cut1,Assistant→Junior,0.32788036333500153,1476.5715326166337,0.999822825598512,False,False
+india,Full_Model,work_years,cut2,Junior→Regular,0.32788036333500153,1476.5715326166337,0.999822825598512,False,False
+india,Full_Model,work_years,cut3,Regular→Senior,0.32788036333500153,1476.5715326166337,0.999822825598512,False,False
+india,Full_Model,work_years,cut4,Senior→Leader,0.32788036333500153,1476.5715326166337,0.999822825598512,False,False
+india,Full_Model,work_years,cut5,Leader→Chief or founder,0.32788036333500153,1476.5715326166337,0.999822825598512,False,False
+india,Full_Model,gender_female,cut1,Assistant→Junior,0.07455883756156036,474.3140969839437,0.9998745781635101,False,False
+india,Full_Model,gender_female,cut2,Junior→Regular,0.07455883756156036,474.3140969839437,0.9998745781635101,False,False
+india,Full_Model,gender_female,cut3,Regular→Senior,0.07455883756156036,474.3140969839437,0.9998745781635101,False,False
+india,Full_Model,gender_female,cut4,Senior→Leader,0.07455883756156036,474.3140969839437,0.9998745781635101,False,False
+india,Full_Model,gender_female,cut5,Leader→Chief or founder,0.07455883756156036,474.3140969839437,0.9998745781635101,False,False
+india,Full_Model,highest_educational_degree_Advanced Degree,cut1,Assistant→Junior,0.40118135642362956,9012.87380357708,0.9999644845343181,False,False
+india,Full_Model,highest_educational_degree_Advanced Degree,cut2,Junior→Regular,0.40118135642362956,9012.87380357708,0.9999644845343181,False,False
+india,Full_Model,highest_educational_degree_Advanced Degree,cut3,Regular→Senior,0.40118135642362956,9012.87380357708,0.9999644845343181,False,False
+india,Full_Model,highest_educational_degree_Advanced Degree,cut4,Senior→Leader,0.40118135642362956,9012.87380357708,0.9999644845343181,False,False
+india,Full_Model,highest_educational_degree_Advanced Degree,cut5,Leader→Chief or founder,0.40118135642362956,9012.87380357708,0.9999644845343181,False,False
+india,Full_Model,internationalization_International,cut1,Assistant→Junior,-0.005747274589524999,459.6002938109044,0.9999900225005873,False,False
+india,Full_Model,internationalization_International,cut2,Junior→Regular,-0.005747274589524999,459.6002938109044,0.9999900225005873,False,False
+india,Full_Model,internationalization_International,cut3,Regular→Senior,-0.005747274589524999,459.6002938109044,0.9999900225005873,False,False
+india,Full_Model,internationalization_International,cut4,Senior→Leader,-0.005747274589524999,459.6002938109044,0.9999900225005873,False,False
+india,Full_Model,internationalization_International,cut5,Leader→Chief or founder,-0.005747274589524999,459.6002938109044,0.9999900225005873,False,False
+india,Full_Model,internationalization_Multinational,cut1,Assistant→Junior,-0.49991736276291393,2775.511548166255,0.9998562872694468,False,False
+india,Full_Model,internationalization_Multinational,cut2,Junior→Regular,-0.2751099228544469,1684.5201452535018,0.9998696922921273,False,False
+india,Full_Model,internationalization_Multinational,cut3,Regular→Senior,-0.038838248782027816,4399.5766443988105,0.9999929564952321,False,False
+india,Full_Model,internationalization_Multinational,cut4,Senior→Leader,0.0015174020946705567,4858.399291100303,0.999999750800288,False,False
+india,Full_Model,internationalization_Multinational,cut5,Leader→Chief or founder,-0.6216781774938563,808.4933246516284,0.9993864793244347,False,False
+india,Full_Model,simplified_company_size_Large (500+ employees),cut1,Assistant→Junior,1.2951220181201895,2456.1626909514453,0.9995792795735661,False,False
+india,Full_Model,simplified_company_size_Large (500+ employees),cut2,Junior→Regular,1.2951220181201895,2456.1626909514453,0.9995792795735661,False,False
+india,Full_Model,simplified_company_size_Large (500+ employees),cut3,Regular→Senior,1.2951220181201895,2456.1626909514453,0.9995792795735661,False,False
+india,Full_Model,simplified_company_size_Large (500+ employees),cut4,Senior→Leader,1.2951220181201895,2456.1626909514453,0.9995792795735661,False,False
+india,Full_Model,simplified_company_size_Large (500+ employees),cut5,Leader→Chief or founder,1.2951220181201895,2456.1626909514453,0.9995792795735661,False,False
+india,Full_Model,simplified_company_size_Small (11-50 employees),cut1,Assistant→Junior,0.007696044915885015,6966.074835331502,0.9999991185056776,False,False
+india,Full_Model,simplified_company_size_Small (11-50 employees),cut2,Junior→Regular,0.007696044915885015,6966.074835331502,0.9999991185056776,False,False
+india,Full_Model,simplified_company_size_Small (11-50 employees),cut3,Regular→Senior,0.007696044915885015,6966.074835331502,0.9999991185056776,False,False
+india,Full_Model,simplified_company_size_Small (11-50 employees),cut4,Senior→Leader,0.007696044915885015,6966.074835331502,0.9999991185056776,False,False
+india,Full_Model,simplified_company_size_Small (11-50 employees),cut5,Leader→Chief or founder,0.007696044915885015,6966.074835331502,0.9999991185056776,False,False
+india,Full_Model,simplified_company_size_Medium (51-500 employees),cut1,Assistant→Junior,-0.13655846084491258,550.9726887109153,0.9998022444874817,False,False
+india,Full_Model,simplified_company_size_Medium (51-500 employees),cut2,Junior→Regular,-0.13655846084491258,550.9726887109153,0.9998022444874817,False,False
+india,Full_Model,simplified_company_size_Medium (51-500 employees),cut3,Regular→Senior,-0.13655846084491258,550.9726887109153,0.9998022444874817,False,False
+india,Full_Model,simplified_company_size_Medium (51-500 employees),cut4,Senior→Leader,-0.13655846084491258,550.9726887109153,0.9998022444874817,False,False
+india,Full_Model,simplified_company_size_Medium (51-500 employees),cut5,Leader→Chief or founder,-0.13655846084491258,550.9726887109153,0.9998022444874817,False,False
+india,Full_Model,rarity_score_z_x_gender_female,cut1,Assistant→Junior,0.2172259519338642,1638.2000756256757,0.9998942002046487,False,False
+india,Full_Model,rarity_score_z_x_gender_female,cut2,Junior→Regular,0.2172259519338642,1638.2000756256757,0.9998942002046487,False,False
+india,Full_Model,rarity_score_z_x_gender_female,cut3,Regular→Senior,0.2172259519338642,1638.2000756256757,0.9998942002046487,False,False
+india,Full_Model,rarity_score_z_x_gender_female,cut4,Senior→Leader,0.2172259519338642,1638.2000756256757,0.9998942002046487,False,False
+india,Full_Model,rarity_score_z_x_gender_female,cut5,Leader→Chief or founder,0.2172259519338642,1638.2000756256757,0.9998942002046487,False,False
+india,Full_Model,year_2,cut1,Assistant→Junior,0.8955310716456739,2622.835117350269,0.9997275732671203,False,False
+india,Full_Model,year_2,cut2,Junior→Regular,0.8955310716456739,2622.835117350269,0.9997275732671203,False,False
+india,Full_Model,year_2,cut3,Regular→Senior,0.8955310716456739,2622.835117350269,0.9997275732671203,False,False
+india,Full_Model,year_2,cut4,Senior→Leader,0.8955310716456739,2622.835117350269,0.9997275732671203,False,False
+india,Full_Model,year_2,cut5,Leader→Chief or founder,0.8955310716456739,2622.835117350269,0.9997275732671203,False,False
+india,Full_Model,year_3,cut1,Assistant→Junior,1.2149803145493614,1129.8823167940552,0.9991420222854837,False,False
+india,Full_Model,year_3,cut2,Junior→Regular,1.2149803145493614,1129.8823167940552,0.9991420222854837,False,False
+india,Full_Model,year_3,cut3,Regular→Senior,1.2149803145493614,1129.8823167940552,0.9991420222854837,False,False
+india,Full_Model,year_3,cut4,Senior→Leader,1.2149803145493614,1129.8823167940552,0.9991420222854837,False,False
+india,Full_Model,year_3,cut5,Leader→Chief or founder,1.2149803145493614,1129.8823167940552,0.9991420222854837,False,False
+india,Full_Model,year_4,cut1,Assistant→Junior,1.048720891897977,964.6394711570458,0.9991325691427468,False,False
+india,Full_Model,year_4,cut2,Junior→Regular,1.048720891897977,964.6394711570458,0.9991325691427468,False,False
+india,Full_Model,year_4,cut3,Regular→Senior,1.048720891897977,964.6394711570458,0.9991325691427468,False,False
+india,Full_Model,year_4,cut4,Senior→Leader,1.048720891897977,964.6394711570458,0.9991325691427468,False,False
+india,Full_Model,year_4,cut5,Leader→Chief or founder,1.048720891897977,964.6394711570458,0.9991325691427468,False,False
+india,Full_Model,year_5,cut1,Assistant→Junior,0.26129766395930026,1518.2657774472714,0.9998626819006826,False,False
+india,Full_Model,year_5,cut2,Junior→Regular,0.26129766395930026,1518.2657774472714,0.9998626819006826,False,False
+india,Full_Model,year_5,cut3,Regular→Senior,0.26129766395930026,1518.2657774472714,0.9998626819006826,False,False
+india,Full_Model,year_5,cut4,Senior→Leader,0.26129766395930026,1518.2657774472714,0.9998626819006826,False,False
+india,Full_Model,year_5,cut5,Leader→Chief or founder,0.26129766395930026,1518.2657774472714,0.9998626819006826,False,False
+india,Full_Model,year_6,cut1,Assistant→Junior,0.18666324174778626,3619.890892597947,0.9999588562962218,False,False
+india,Full_Model,year_6,cut2,Junior→Regular,0.18666324174778626,3619.890892597947,0.9999588562962218,False,False
+india,Full_Model,year_6,cut3,Regular→Senior,0.18666324174778626,3619.890892597947,0.9999588562962218,False,False
+india,Full_Model,year_6,cut4,Senior→Leader,0.18666324174778626,3619.890892597947,0.9999588562962218,False,False
+india,Full_Model,year_6,cut5,Leader→Chief or founder,0.18666324174778626,3619.890892597947,0.9999588562962218,False,False
+india,Full_Model,year_7,cut1,Assistant→Junior,1.145170631634976,234.29225690865394,0.9961001257986044,False,False
+india,Full_Model,year_7,cut2,Junior→Regular,1.145170631634976,234.29225690865394,0.9961001257986044,False,False
+india,Full_Model,year_7,cut3,Regular→Senior,1.145170631634976,234.29225690865394,0.9961001257986044,False,False
+india,Full_Model,year_7,cut4,Senior→Leader,1.145170631634976,234.29225690865394,0.9961001257986044,False,False
+india,Full_Model,year_7,cut5,Leader→Chief or founder,1.145170631634976,234.29225690865394,0.9961001257986044,False,False
+india,Full_Model,year_8,cut1,Assistant→Junior,-0.06618677117428004,3462.677248054324,0.9999847489676157,False,False
+india,Full_Model,year_8,cut2,Junior→Regular,-0.06618677117428004,3462.677248054324,0.9999847489676157,False,False
+india,Full_Model,year_8,cut3,Regular→Senior,-0.06618677117428004,3462.677248054324,0.9999847489676157,False,False
+india,Full_Model,year_8,cut4,Senior→Leader,-0.06618677117428004,3462.677248054324,0.9999847489676157,False,False
+india,Full_Model,year_8,cut5,Leader→Chief or founder,-0.06618677117428004,3462.677248054324,0.9999847489676157,False,False
+india,Full_Model,year_9,cut1,Assistant→Junior,1.268842376277119,1895.9211008038103,0.9994660169845038,False,False
+india,Full_Model,year_9,cut2,Junior→Regular,1.268842376277119,1895.9211008038103,0.9994660169845038,False,False
+india,Full_Model,year_9,cut3,Regular→Senior,1.268842376277119,1895.9211008038103,0.9994660169845038,False,False
+india,Full_Model,year_9,cut4,Senior→Leader,1.268842376277119,1895.9211008038103,0.9994660169845038,False,False
+india,Full_Model,year_9,cut5,Leader→Chief or founder,1.268842376277119,1895.9211008038103,0.9994660169845038,False,False
